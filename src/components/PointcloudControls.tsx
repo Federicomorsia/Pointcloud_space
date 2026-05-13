@@ -8,11 +8,13 @@ interface PointcloudControlsProps {
   modelIds: string[];
   isBusy: boolean;
   notice: EngineNotice | null;
+  isHidden: boolean;
   onDismissNotice: () => void;
   onAddFiles: (files: FileList | null) => Promise<void>;
   onAddUrl: (url: string, animationDuration?: number) => Promise<void>;
   onRemoveModel: (id: string) => void;
   onUpdateControls: (partial: Partial<EngineControlsState>) => void;
+  onToggleVisibility: () => void;
 }
 
 export function PointcloudControls({
@@ -20,11 +22,13 @@ export function PointcloudControls({
   modelIds,
   isBusy,
   notice,
+  isHidden,
   onDismissNotice,
   onAddFiles,
   onAddUrl,
   onRemoveModel,
-  onUpdateControls
+  onUpdateControls,
+  onToggleVisibility
 }: PointcloudControlsProps) {
   const [removeId, setRemoveId] = useState('');
   const [urlValue, setUrlValue] = useState('');
@@ -62,10 +66,23 @@ export function PointcloudControls({
   };
 
   return (
-    <aside className="pc-controls" aria-label="Controlli pointcloud">
+    <aside
+      className={`pc-controls ${isHidden ? 'pc-controls-hidden' : ''}`}
+      aria-label="Controlli pointcloud"
+    >
       <div className="pc-controls-header">
-        <h1>PCL Setup</h1>
-        <p>Load models and configure rendering</p>
+        <div className="pc-controls-title">
+          <h1>PCL Setup</h1>
+          <p>Load models and configure rendering</p>
+        </div>
+        <button
+          type="button"
+          className="pc-controls-toggle"
+          onClick={onToggleVisibility}
+          aria-label={isHidden ? 'Mostra pannello setup' : 'Nascondi pannello setup'}
+        >
+          {isHidden ? 'Mostra' : 'Nascondi'}
+        </button>
       </div>
 
       {notice && (

@@ -1,4 +1,5 @@
 import type { RefObject } from 'react';
+import logoPiantalaUrl from '../logo piantala.png';
 
 interface PointcloudStageProps {
   stageRef: RefObject<HTMLDivElement>;
@@ -6,6 +7,8 @@ interface PointcloudStageProps {
   isReady: boolean;
   modelCount: number;
   totalPoints: number;
+  showControlsButton?: boolean;
+  onShowControls?: () => void;
 }
 
 export function PointcloudStage({
@@ -13,7 +16,9 @@ export function PointcloudStage({
   canvasRef,
   isReady,
   modelCount,
-  totalPoints
+  totalPoints,
+  showControlsButton = false,
+  onShowControls
 }: PointcloudStageProps) {
   return (
     <section className="pc-stage-panel" aria-label="Stage pointcloud">
@@ -22,8 +27,11 @@ export function PointcloudStage({
         
         <div className="pc-stage-overlay">
           <div className="pc-stage-title">
-            <h2>PIANTALA</h2>
-            <h3>2028</h3>
+            <img
+              src={logoPiantalaUrl}
+              alt="Piantala 2028"
+              className="pc-stage-logo"
+            />
           </div>
         </div>
 
@@ -32,6 +40,17 @@ export function PointcloudStage({
           <span>M: {modelCount}</span>
           <span>Pts: {totalPoints.toLocaleString('en-US')}</span>
         </div>
+
+        {showControlsButton && (
+          <button
+            type="button"
+            className="pc-show-controls"
+            onClick={onShowControls}
+            aria-label="Mostra pannello setup"
+          >
+            Mostra setup
+          </button>
+        )}
       </div>
     </section>
   );

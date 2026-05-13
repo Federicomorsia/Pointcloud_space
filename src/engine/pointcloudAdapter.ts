@@ -1,4 +1,5 @@
 import { loadCreatePointcloudEngine } from './loadEngineFactory';
+import logoPiantalaUrl from '../logo piantala.png';
 import type {
   PointcloudEngine,
   PointcloudEngineOptions
@@ -132,6 +133,8 @@ export class PointcloudEngineAdapter {
     scale: { set: (x: number, y: number, z: number) => void };
   } | null = null;
 
+  private titleSpriteAspect = 512 / 2048;
+
   private depthShadedMaterial: {
     uniforms?: Record<string, { value: number }>;
     vertexShader?: string;
@@ -182,14 +185,14 @@ export class PointcloudEngineAdapter {
       randomPlacementRange: 5,
       randomPlacementPadding: 1.6,
       randomPlacementAttempts: 200,
-      background: '#000000',
+      background: '#201203',
       ...initialOptions
     });
 
     const adapter = new PointcloudEngineAdapter(engine, stage);
     adapter.applyFrontCameraPose();
     adapter.lockCameraInteraction();
-    await adapter.add3dTitle('PIANTALA 2028');
+    await adapter.add3dLogo(logoPiantalaUrl);
     return adapter;
   }
 
@@ -201,6 +204,58 @@ export class PointcloudEngineAdapter {
     return this.engine.getStats();
   }
 
+  private async add3dLogo(imageUrl: string): Promise<void> {
+    const scene = (this.engine as any).scene;
+    if (!scene) {
+      return;
+    }
+
+    const THREE = await import('three');
+
+    const loader = new THREE.TextureLoader();
+    let texture: THREE.Texture | null = null;
+    try {
+      texture = await new Promise<THREE.Texture>((resolve, reject) => {
+        loader.load(
+          imageUrl,
+          (loadedTexture: THREE.Texture) => resolve(loadedTexture),
+          undefined,
+          (error: unknown) => reject(error)
+        );
+      });
+    } catch {
+      await this.add3dTitle('PIANTALA 2028');
+      return;
+    }
+
+    if (!texture) {
+      await this.add3dTitle('PIANTALA 2028');
+      return;
+    }
+
+    texture.needsUpdate = true;
+
+    const image = texture.image as { width?: number; height?: number } | undefined;
+    if (image?.width && image?.height) {
+      this.titleSpriteAspect = image.height / image.width;
+    }
+
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false
+    });
+
+    const sprite = new THREE.Sprite(spriteMaterial);
+    sprite.position.set(0, 0, 0.1);
+
+    scene.add(sprite);
+    this.titleSprite = sprite;
+    this.updateDepthAtmosphere();
+    this.updateTitleScale();
+  }
+
   private async add3dTitle(text: string): Promise<void> {
     const scene = (this.engine as any).scene;
     if (!scene) {
@@ -208,6 +263,8 @@ export class PointcloudEngineAdapter {
     }
 
     const THREE = await import('three');
+
+    this.titleSpriteAspect = 512 / 2048;
 
     const canvas = document.createElement('canvas');
     canvas.width = 2048;
@@ -516,7 +573,7 @@ export class PointcloudEngineAdapter {
     const visibleHeight = 2 * Math.tan(vFov / 2) * distance;
     const visibleWidth = visibleHeight * camera.aspect;
     const targetWidth = visibleWidth * 0.5;
-    const targetHeight = targetWidth * (512 / 2048);
+    const targetHeight = targetWidth * this.titleSpriteAspect;
 
     sprite.scale.set(targetWidth, targetHeight, 1);
   }

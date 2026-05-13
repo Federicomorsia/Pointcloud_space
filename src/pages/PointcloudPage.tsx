@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { PointcloudControls } from '../components/PointcloudControls';
 import { PointcloudStage } from '../components/PointcloudStage';
 import { usePointcloudEngine } from '../hooks/usePointcloudEngine';
@@ -6,6 +6,7 @@ import { usePointcloudEngine } from '../hooks/usePointcloudEngine';
 export function PointcloudPage() {
   const stageRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [controlsHidden, setControlsHidden] = useState(false);
 
   const {
     isReady,
@@ -25,17 +26,19 @@ export function PointcloudPage() {
   });
 
   return (
-    <main className="pc-layout">
+    <main className={`pc-layout ${controlsHidden ? 'pc-layout--controls-hidden' : ''}`}>
       <PointcloudControls
         controls={controls}
         modelIds={modelIds}
         isBusy={isBusy}
         notice={notice}
+        isHidden={controlsHidden}
         onDismissNotice={() => setNotice(null)}
         onAddFiles={addFromFiles}
         onAddUrl={addFromUrl}
         onRemoveModel={removeModel}
         onUpdateControls={updateControls}
+        onToggleVisibility={() => setControlsHidden((current) => !current)}
       />
       <PointcloudStage
         stageRef={stageRef}
@@ -43,6 +46,8 @@ export function PointcloudPage() {
         isReady={isReady}
         modelCount={stats.modelCount}
         totalPoints={stats.totalPoints}
+        showControlsButton={controlsHidden}
+        onShowControls={() => setControlsHidden(false)}
       />
     </main>
   );

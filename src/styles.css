@@ -1,7 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap');
 
 :root {
-  --bg: #111;
+  --bg: #201203;
   --border: #222;
   --text: #f0f0f0;
   --text-muted: #999;
@@ -38,6 +38,10 @@ body {
   overflow: hidden;
 }
 
+.pc-layout--controls-hidden {
+  grid-template-columns: 0 1fr;
+}
+
 .pc-controls {
   display: flex;
   flex-direction: column;
@@ -48,14 +52,30 @@ body {
   min-height: 0;
 }
 
+.pc-controls-hidden {
+  opacity: 0;
+  pointer-events: none;
+  border-right: 0;
+}
+
 .pc-controls-header {
   padding: 1.5rem 1.5rem 1rem;
   border-bottom: 2px solid var(--border);
   flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.pc-controls-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 .pc-controls-header h1 {
-  margin: 0 0 0.5rem 0;
+  margin: 0;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.1em;
@@ -67,6 +87,19 @@ body {
   margin: 0;
   color: var(--text-muted);
   font-size: 12px;
+}
+
+.pc-controls-toggle {
+  flex: 0 0 auto;
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+  padding: 0.35rem 0.6rem;
+  font-size: 10px;
+}
+
+.pc-controls-toggle:hover:not(:disabled) {
+  border-color: var(--text);
+  color: var(--bg);
 }
 
 .pc-notice {
@@ -302,6 +335,22 @@ input[type='color'] {
   text-transform: uppercase;
 }
 
+.pc-show-controls {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 11;
+  padding: 0.4rem 0.7rem;
+  font-size: 10px;
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.pc-show-controls:hover:not(:disabled) {
+  border-color: var(--text);
+  color: var(--bg);
+}
+
 .pc-stage-overlay {
   position: absolute;
   top: 0;
@@ -318,6 +367,12 @@ input[type='color'] {
 .pc-stage-title {
   text-align: center;
   font-family: 'IBM Plex Mono', monospace;
+}
+
+.pc-stage-logo {
+  width: min(60vw, 520px);
+  height: auto;
+  display: block;
 }
 
 .pc-stage-title h2 {
@@ -345,12 +400,20 @@ input[type='color'] {
     grid-template-rows: auto 1fr;
   }
 
+  .pc-layout--controls-hidden {
+    grid-template-rows: 0 1fr;
+  }
+
   .pc-controls {
     border-right: none;
     border-bottom: 2px solid var(--border);
     max-height: 50%;
     order: 2;
     min-height: 0;
+  }
+
+  .pc-layout--controls-hidden .pc-controls {
+    border-bottom: 0;
   }
 
   .pc-stage-panel {
