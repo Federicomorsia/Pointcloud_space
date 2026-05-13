@@ -1,0 +1,3 @@
+# Cartella per modelli 3D di debug
+# Carica qui i tuoi file .obj e .glb per il testing
+# I modelli verranno serviti da http://localhost:5175/models/tuomodello.glb
