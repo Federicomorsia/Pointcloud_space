@@ -20,6 +20,9 @@ const WIND_INTERVAL_MIN_MS = 6800;
 const WIND_INTERVAL_MAX_MS = 15200;
 const WIND_GUST_DURATION_MIN_MS = 1800;
 const WIND_GUST_DURATION_MAX_MS = 3600;
+const WIND_BASE_AMPLITUDE = 1.6;
+const WIND_GUST_MIN = 0.4;
+const WIND_GUST_MAX = 1.4;
 
 interface WindGustState {
   nextAtMs: number;
@@ -409,7 +412,7 @@ export class PointcloudEngineAdapter {
     }
 
     material.uniforms.uWindTime = { value: 0 };
-    material.uniforms.uWindAmplitude = { value: 4 };
+    material.uniforms.uWindAmplitude = { value: WIND_BASE_AMPLITUDE };
     material.uniforms.uWindGust = { value: 0 };
 
     material.vertexShader = material.vertexShader
@@ -473,7 +476,7 @@ export class PointcloudEngineAdapter {
     if (!gust.activeFromMs && nowMs >= gust.nextAtMs) {
       gust.activeFromMs = nowMs;
       gust.durationMs = randomBetween(WIND_GUST_DURATION_MIN_MS, WIND_GUST_DURATION_MAX_MS);
-      gust.peakStrength = randomBetween(0.24, 1);
+      gust.peakStrength = randomBetween(WIND_GUST_MIN, WIND_GUST_MAX);
     }
 
     if (!gust.activeFromMs || !gust.durationMs) {
@@ -506,7 +509,7 @@ export class PointcloudEngineAdapter {
     }
 
     if (material.uniforms.uWindAmplitude) {
-      material.uniforms.uWindAmplitude.value = 1.04;
+      material.uniforms.uWindAmplitude.value = WIND_BASE_AMPLITUDE;
     }
 
     if (material.uniforms.uWindGust) {
