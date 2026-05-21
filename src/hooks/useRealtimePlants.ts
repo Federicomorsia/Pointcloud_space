@@ -34,6 +34,7 @@ export function useRealtimePlants({
   onNotice
 }: UseRealtimePlantsArgs) {
   const loadedEventIdsRef = useRef(new Set<string>());
+  const loadedPlantKeysRef = useRef(new Set<string>());
   const [plants, setPlants] = useState<RealtimePlant[]>([]);
 
   useEffect(() => {
@@ -51,8 +52,13 @@ export function useRealtimePlants({
 
     const handleScanEvent = async (event: QrScanEvent) => {
       const eventId = event.id ?? `${event.qr_code ?? 'qr'}-${event.created_at ?? Date.now()}`;
+      const plantKey = event.qr_code ?? event.model_key ?? event.model_url ?? eventId;
 
       if (loadedEventIdsRef.current.has(eventId)) {
+        return;
+      }
+
+      if (loadedPlantKeysRef.current.has(plantKey)) {
         return;
       }
 
@@ -75,6 +81,7 @@ export function useRealtimePlants({
       }
 
       loadedEventIdsRef.current.add(eventId);
+      loadedPlantKeysRef.current.add(plantKey);
       try {
         await onAddUrl(modelUrl, 600);
         console.info('[Piantala realtime] Modello caricato', {
@@ -89,6 +96,7 @@ export function useRealtimePlants({
           error
         });
         loadedEventIdsRef.current.delete(eventId);
+        loadedPlantKeysRef.current.delete(plantKey);
         return;
       }
 

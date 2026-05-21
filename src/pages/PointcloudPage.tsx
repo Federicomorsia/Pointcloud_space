@@ -19,7 +19,6 @@ export function PointcloudPage() {
     setNotice,
     addFromFiles,
     addFromUrl,
-    addRealtimeFromUrl,
     removeModel,
     updateControls
   } = usePointcloudEngine({
@@ -29,7 +28,7 @@ export function PointcloudPage() {
 
   useRealtimePlants({
     isReady,
-    onAddUrl: addRealtimeFromUrl,
+    onAddUrl: addFromUrl,
     onNotice: setNotice
   });
 

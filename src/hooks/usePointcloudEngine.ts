@@ -99,7 +99,6 @@ interface UsePointcloudEngineResult {
   setNotice: (notice: EngineNotice | null) => void;
   addFromFiles: (files: FileList | null) => Promise<void>;
   addFromUrl: (url: string, animationDuration?: number) => Promise<void>;
-  addRealtimeFromUrl: (url: string, animationDuration?: number) => Promise<void>;
   removeModel: (id: string) => void;
   resetCamera: () => void;
   updateControls: (partial: Partial<EngineControlsState>) => void;
@@ -276,31 +275,6 @@ export function usePointcloudEngine({
         });
       } catch (error) {
         setNotice({ type: 'error', text: parseUserError(error) });
-      } finally {
-        setIsBusy(false);
-      }
-    },
-    [syncFromEngine]
-  );
-
-  const addRealtimeFromUrl = useCallback(
-    async (url: string, animationDuration?: number) => {
-      const engine = engineRef.current;
-      if (!engine) {
-        setNotice({ type: 'error', text: 'Engine non pronto: attendi il caricamento.' });
-        throw new Error('Engine non pronto: attendi il caricamento.');
-      }
-
-      setIsBusy(true);
-      try {
-        const modelId = await engine.addRealtimeModelFromUrl(url, animationDuration);
-        syncFromEngine();
-        setNotice({
-          type: 'success',
-          text: `Pianta realtime aggiunta con id ${modelId}.`
-        });
-      } catch (error) {
-        setNotice({ type: 'error', text: parseUserError(error) });
         throw error;
       } finally {
         setIsBusy(false);
@@ -377,7 +351,6 @@ export function usePointcloudEngine({
     setNotice,
     addFromFiles,
     addFromUrl,
-    addRealtimeFromUrl,
     removeModel,
     resetCamera,
     updateControls

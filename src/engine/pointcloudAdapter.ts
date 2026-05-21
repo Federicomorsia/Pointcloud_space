@@ -810,44 +810,6 @@ export class PointcloudEngineAdapter {
     }
   }
 
-  async addRealtimeModelFromUrl(url: string, animationDuration = 600): Promise<string> {
-    this.assertNotDisposed();
-
-    const trimmedUrl = url.trim();
-    if (!trimmedUrl) {
-      throw new Error('Inserisci un URL valido per il modello.');
-    }
-
-    const extension = getUrlExtension(trimmedUrl);
-    if (!URL_MODEL_EXTENSIONS.has(extension)) {
-      throw new Error('Formato URL non valido. Usa .obj, .glb o .gltf.');
-    }
-
-    const id = buildModelId(trimmedUrl);
-
-    try {
-      await this.engine.addModelFromUrl(trimmedUrl, {
-        id,
-        randomPlacement: false,
-        frame: true,
-        loadingAnimationDuration: animationDuration,
-        scale: { x: 2.4, y: 2.4, z: 2.4 },
-        position: { x: 0, y: 0, z: 0 }
-      });
-      this.ensureWindLoop();
-      this.ensureDepthPointShading();
-      this.updateDepthPointShading();
-      this.modelSpawnPositions.set(id, { x: 0, y: 0, z: 0 });
-      this.resetCamera();
-      return id;
-    } catch (error) {
-      throw normalizeEngineError(
-        error,
-        'Parsing fallito dal URL indicato. Controlla formato e accessibilita del file.'
-      );
-    }
-  }
-
   removeModel(id: string): void {
     this.assertNotDisposed();
 
