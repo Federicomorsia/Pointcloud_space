@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { PointcloudControls } from '../components/PointcloudControls';
 import { PointcloudStage } from '../components/PointcloudStage';
 import { usePointcloudEngine } from '../hooks/usePointcloudEngine';
+import { useRealtimePlants } from '../hooks/useRealtimePlants';
 
 export function PointcloudPage() {
   const stageRef = useRef<HTMLDivElement>(null);
@@ -18,11 +19,18 @@ export function PointcloudPage() {
     setNotice,
     addFromFiles,
     addFromUrl,
+    addRealtimeFromUrl,
     removeModel,
     updateControls
   } = usePointcloudEngine({
     stageRef,
     canvasRef
+  });
+
+  useRealtimePlants({
+    isReady,
+    onAddUrl: addRealtimeFromUrl,
+    onNotice: setNotice
   });
 
   return (

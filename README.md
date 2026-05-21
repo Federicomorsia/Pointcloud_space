@@ -80,6 +80,38 @@ npm run build
 npm run preview
 ```
 
+## Supabase Realtime
+
+Il sito puo ascoltare le piante aggiunte dall'app principale Piantala tramite Supabase Realtime.
+
+Configura un file `.env.local` nella root del progetto:
+
+```bash
+VITE_SUPABASE_URL=https://TUO_PROJECT_REF.supabase.co
+VITE_SUPABASE_ANON_KEY=LA_TUA_ANON_O_PUBLISHABLE_KEY
+```
+
+La tabella ascoltata e `public.qr_scan_events`. Ogni insert deve avere questo formato:
+
+```json
+{
+  "qr_code": "PIANTA-001",
+  "model_key": "monstera",
+  "model_url": "/models/monstera.glb",
+  "scanned_by": "uuid-utente-supabase",
+  "source": "piantala-web-app"
+}
+```
+
+Quando arriva un evento realtime, il sito risolve `model_key` su un file locale in `public/models` e carica il modello con il motore pointcloud. Il campo `scanned_by` viene conservato nello stato realtime per collegare ogni pianta all'utente che l'ha aggiunta.
+
+Per il test end-to-end:
+
+1. Avvia questo sito con `npm run dev`.
+2. Avvia l'app Piantala principale.
+3. Nell'app principale inserisci manualmente `PIANTA-001`.
+4. Questo sito deve ricevere l'evento realtime e caricare `public/models/monstera.glb`.
+
 ## Controlli disponibili
 
 - Aggiungi modelli da file (`.obj`, `.glb`) con upload multiplo

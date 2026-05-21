@@ -86,11 +86,16 @@ function getExtension(source: string): string {
 }
 
 function getUrlExtension(url: string): string {
+  const trimmedUrl = url.trim();
+
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(
+      trimmedUrl,
+      typeof window !== 'undefined' ? window.location.origin : 'http://localhost'
+    );
     return getExtension(parsed.pathname);
   } catch {
-    return '';
+    return getExtension(trimmedUrl.split('?')[0]?.split('#')[0] ?? trimmedUrl);
   }
 }
 
@@ -216,12 +221,12 @@ export class PointcloudEngineAdapter {
     const THREE = await import('three');
 
     const loader = new THREE.TextureLoader();
-    let texture: THREE.Texture | null = null;
+    let texture: import('three').Texture | null = null;
     try {
-      texture = await new Promise<THREE.Texture>((resolve, reject) => {
+      texture = await new Promise<import('three').Texture>((resolve, reject) => {
         loader.load(
           imageUrl,
-          (loadedTexture: THREE.Texture) => resolve(loadedTexture),
+          (loadedTexture: import('three').Texture) => resolve(loadedTexture),
           undefined,
           (error: unknown) => reject(error)
         );
@@ -786,7 +791,7 @@ export class PointcloudEngineAdapter {
       await this.engine.addModelFromUrl(trimmedUrl, {
         id,
         randomPlacement: false,
-        frame: false,
+        frame: true,
         loadingAnimationDuration: animationDuration,
         scale,
         position,
@@ -796,6 +801,44 @@ export class PointcloudEngineAdapter {
       this.ensureDepthPointShading();
       this.updateDepthPointShading();
       this.modelSpawnPositions.set(id, position);
+      return id;
+    } catch (error) {
+      throw normalizeEngineError(
+        error,
+        'Parsing fallito dal URL indicato. Controlla formato e accessibilita del file.'
+      );
+    }
+  }
+
+  async addRealtimeModelFromUrl(url: string, animationDuration = 600): Promise<string> {
+    this.assertNotDisposed();
+
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) {
+      throw new Error('Inserisci un URL valido per il modello.');
+    }
+
+    const extension = getUrlExtension(trimmedUrl);
+    if (!URL_MODEL_EXTENSIONS.has(extension)) {
+      throw new Error('Formato URL non valido. Usa .obj, .glb o .gltf.');
+    }
+
+    const id = buildModelId(trimmedUrl);
+
+    try {
+      await this.engine.addModelFromUrl(trimmedUrl, {
+        id,
+        randomPlacement: false,
+        frame: true,
+        loadingAnimationDuration: animationDuration,
+        scale: { x: 2.4, y: 2.4, z: 2.4 },
+        position: { x: 0, y: 0, z: 0 }
+      });
+      this.ensureWindLoop();
+      this.ensureDepthPointShading();
+      this.updateDepthPointShading();
+      this.modelSpawnPositions.set(id, { x: 0, y: 0, z: 0 });
+      this.resetCamera();
       return id;
     } catch (error) {
       throw normalizeEngineError(

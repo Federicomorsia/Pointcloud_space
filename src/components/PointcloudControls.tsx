@@ -42,8 +42,12 @@ export function PointcloudControls({
   };
 
   const handleAddUrl = async () => {
-    await onAddUrl(urlValue);
-    setUrlValue('');
+    try {
+      await onAddUrl(urlValue);
+      setUrlValue('');
+    } catch {
+      // Notice is handled by the engine hook.
+    }
   };
 
   const handleRemove = () => {
