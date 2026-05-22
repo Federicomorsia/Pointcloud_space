@@ -8,9 +8,12 @@ import type {
 const FILE_MODEL_EXTENSIONS = new Set(['obj', 'glb']);
 const URL_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'gltf']);
 const MODEL_SCALE = 0.72;
-const SPAWN_SLOTS_PER_RING = 8;
-const SPAWN_RING_STEP = 1.05;
-const SPAWN_MIN_DISTANCE_XY = 1.25;
+const SPAWN_MIN_RADIUS = 1.15;
+const SPAWN_MAX_RADIUS = 3.85;
+const SPAWN_X_RADIUS_FACTOR = 1.25;
+const SPAWN_Y_RADIUS_FACTOR = 0.74;
+const SPAWN_CENTER_CLEAR_RADIUS = 0.92;
+const SPAWN_MIN_DISTANCE_XY = 1.32;
 const SPAWN_CANDIDATE_LIMIT = 240;
 const SPAWN_DEPTH_LAYERS = [1.7, 1.1, 0.4, -0.2, -0.75] as const;
 const DEPTH_FOG_COLOR = '#000000';
@@ -658,30 +661,29 @@ export class PointcloudEngineAdapter {
 
   private nextSpawnPosition(): { x: number; y: number; z: number } {
     for (let attempt = 0; attempt < SPAWN_CANDIDATE_LIMIT; attempt += 1) {
-      const index = this.spawnIndex + attempt;
-      const slot = index % SPAWN_SLOTS_PER_RING;
-      const ring = Math.floor(index / SPAWN_SLOTS_PER_RING);
-      const stagger = ring % 2 === 0 ? 0 : Math.PI / SPAWN_SLOTS_PER_RING;
-      const angle = (slot / SPAWN_SLOTS_PER_RING) * Math.PI * 2 + stagger;
-
-      // Ellisse contenuta nel viewport con camera fissa.
-      const radius = 0.95 + ring * SPAWN_RING_STEP;
+      const depthIndex = (this.spawnIndex + attempt) % SPAWN_DEPTH_LAYERS.length;
+      const angle = Math.random() * Math.PI * 2;
+      const radius = Math.sqrt(
+        randomBetween(SPAWN_MIN_RADIUS ** 2, SPAWN_MAX_RADIUS ** 2)
+      );
       const candidate = {
-        x: Math.cos(angle) * radius * 1.1,
-        y: Math.sin(angle) * radius * 0.75,
-        z: SPAWN_DEPTH_LAYERS[index % SPAWN_DEPTH_LAYERS.length]
+        x: Math.cos(angle) * radius * SPAWN_X_RADIUS_FACTOR,
+        y: Math.sin(angle) * radius * SPAWN_Y_RADIUS_FACTOR,
+        z: SPAWN_DEPTH_LAYERS[depthIndex]
       };
 
       if (this.isSpawnPositionFree(candidate)) {
-        this.spawnIndex = index + 1;
+        this.spawnIndex += attempt + 1;
         return candidate;
       }
     }
 
     // Fallback: evita blocchi anche con molte piante caricate.
+    const fallbackAngle = Math.random() * Math.PI * 2;
+    const fallbackRadius = randomBetween(SPAWN_MIN_RADIUS, SPAWN_MAX_RADIUS);
     const fallback = {
-      x: (Math.random() - 0.5) * 2.2,
-      y: (Math.random() - 0.5) * 1.6,
+      x: Math.cos(fallbackAngle) * fallbackRadius * SPAWN_X_RADIUS_FACTOR,
+      y: Math.sin(fallbackAngle) * fallbackRadius * SPAWN_Y_RADIUS_FACTOR,
       z: SPAWN_DEPTH_LAYERS[Math.floor(Math.random() * SPAWN_DEPTH_LAYERS.length)]
     };
     this.spawnIndex += 1;
@@ -708,6 +710,10 @@ export class PointcloudEngineAdapter {
   }
 
   private isSpawnPositionFree(candidate: { x: number; y: number; z: number }): boolean {
+    if (Math.hypot(candidate.x, candidate.y) < SPAWN_CENTER_CLEAR_RADIUS) {
+      return false;
+    }
+
     for (const occupied of this.modelSpawnPositions.values()) {
       const dx = occupied.x - candidate.x;
       const dy = occupied.y - candidate.y;
@@ -740,6 +746,7 @@ export class PointcloudEngineAdapter {
       const id = buildModelId(file.name);
       const position = this.nextSpawnPosition();
       const scale = this.buildScaleForDepth(position.z);
+      this.modelSpawnPositions.set(id, position);
       try {
         await this.engine.addModelFromFile(file, {
           id,
@@ -754,8 +761,8 @@ export class PointcloudEngineAdapter {
         this.ensureDepthPointShading();
         this.updateDepthPointShading();
         addedIds.push(id);
-        this.modelSpawnPositions.set(id, position);
       } catch (error) {
+        this.modelSpawnPositions.delete(id);
         throw normalizeEngineError(
           error,
           `Parsing fallito per "${file.name}". Verifica che il modello non sia corrotto.`
@@ -786,23 +793,26 @@ export class PointcloudEngineAdapter {
     const id = buildModelId(trimmedUrl);
     const position = this.nextSpawnPosition();
     const scale = this.buildScaleForDepth(position.z);
+    this.modelSpawnPositions.set(id, position);
 
     try {
       await this.engine.addModelFromUrl(trimmedUrl, {
         id,
         randomPlacement: false,
-        frame: true,
+        frame: false,
         loadingAnimationDuration: animationDuration,
         scale,
         position,
         rotation: UPRIGHT_ROTATION
       });
+      this.applyFrontCameraPose();
+      this.updateTitleScale();
       this.ensureWindLoop();
       this.ensureDepthPointShading();
       this.updateDepthPointShading();
-      this.modelSpawnPositions.set(id, position);
       return id;
     } catch (error) {
+      this.modelSpawnPositions.delete(id);
       throw normalizeEngineError(
         error,
         'Parsing fallito dal URL indicato. Controlla formato e accessibilita del file.'
