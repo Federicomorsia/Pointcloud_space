@@ -20,6 +20,7 @@ export function PointcloudPage() {
     addFromFiles,
     addFromUrl,
     removeModel,
+    triggerSelectiveBloom,
     updateControls
   } = usePointcloudEngine({
     stageRef,
@@ -29,6 +30,7 @@ export function PointcloudPage() {
   useRealtimePlants({
     isReady,
     onAddUrl: addFromUrl,
+    onTriggerBloom: triggerSelectiveBloom,
     onNotice: setNotice
   });
 

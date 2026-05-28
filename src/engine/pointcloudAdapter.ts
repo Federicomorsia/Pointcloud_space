@@ -26,6 +26,10 @@ const WIND_GUST_DURATION_MAX_MS = 3600;
 const WIND_BASE_AMPLITUDE = 1.6;
 const WIND_GUST_MIN = 0.4;
 const WIND_GUST_MAX = 1.4;
+const BLOOM_LAYER = 1;
+const QR_BLOOM_STRENGTH = 1.65;
+const QR_BLOOM_RADIUS = 0.32;
+const QR_BLOOM_THRESHOLD = 0.08;
 
 interface WindGustState {
   nextAtMs: number;
@@ -137,6 +141,8 @@ export class PointcloudEngineAdapter {
 
   private readonly modelSpawnPositions = new Map<string, { x: number; y: number; z: number }>();
 
+  private readonly modelPointObjects = new Map<string, any>();
+
   private viewDebug: ViewDebugOptions = { ...DEFAULT_VIEW_DEBUG };
 
   private titleSprite: {
@@ -168,6 +174,8 @@ export class PointcloudEngineAdapter {
   };
 
   private disposed = false;
+
+  private selectiveBloomTimeoutId: number | null = null;
 
   private constructor(engine: PointcloudEngine, stage: HTMLElement) {
     this.engine = engine;
@@ -213,6 +221,88 @@ export class PointcloudEngineAdapter {
 
   getStats(): PointcloudStats {
     return this.engine.getStats();
+  }
+
+  private getPointObjects(): any[] {
+    const scene = (this.engine as any).scene;
+    const points: any[] = [];
+
+    if (!scene || typeof scene.traverse !== 'function') {
+      return points;
+    }
+
+    scene.traverse((object: any) => {
+      if (object?.isPoints) {
+        points.push(object);
+      }
+    });
+
+    return points;
+  }
+
+  private captureModelPointObject(modelId: string, previousPoints: Set<any>): void {
+    const nextPoint = this.getPointObjects().find((point) => !previousPoints.has(point));
+
+    if (nextPoint) {
+      nextPoint.userData = {
+        ...(nextPoint.userData ?? {}),
+        pointcloudModelId: modelId
+      };
+      this.modelPointObjects.set(modelId, nextPoint);
+    }
+  }
+
+  private restoreAllModelBloomLayers(): void {
+    for (const point of this.modelPointObjects.values()) {
+      if (typeof point?.layers?.enable === 'function') {
+        point.layers.enable(BLOOM_LAYER);
+      }
+    }
+  }
+
+  triggerSelectiveBloom(
+    modelIds: string[],
+    durationMs: number,
+    restoreOptions: Partial<EngineRuntimeOptions>
+  ): boolean {
+    this.assertNotDisposed();
+
+    const targetIds = new Set(modelIds.filter((id) => this.modelPointObjects.has(id)));
+    if (!targetIds.size) {
+      return false;
+    }
+
+    if (this.selectiveBloomTimeoutId !== null) {
+      window.clearTimeout(this.selectiveBloomTimeoutId);
+      this.selectiveBloomTimeoutId = null;
+    }
+
+    for (const [modelId, point] of this.modelPointObjects.entries()) {
+      if (!point?.layers) {
+        continue;
+      }
+
+      if (targetIds.has(modelId)) {
+        point.layers.enable(BLOOM_LAYER);
+      } else {
+        point.layers.disable(BLOOM_LAYER);
+      }
+    }
+
+    this.engine.setOptions({
+      bloomEnabled: true,
+      bloomStrength: QR_BLOOM_STRENGTH,
+      bloomRadius: QR_BLOOM_RADIUS,
+      bloomThreshold: QR_BLOOM_THRESHOLD
+    });
+
+    this.selectiveBloomTimeoutId = window.setTimeout(() => {
+      this.restoreAllModelBloomLayers();
+      this.engine.setOptions(restoreOptions);
+      this.selectiveBloomTimeoutId = null;
+    }, Math.max(800, durationMs));
+
+    return true;
   }
 
   private async add3dLogo(imageUrl: string): Promise<void> {
@@ -748,6 +838,7 @@ export class PointcloudEngineAdapter {
       const scale = this.buildScaleForDepth(position.z);
       this.modelSpawnPositions.set(id, position);
       try {
+        const previousPoints = new Set(this.getPointObjects());
         await this.engine.addModelFromFile(file, {
           id,
           randomPlacement: false,
@@ -757,6 +848,7 @@ export class PointcloudEngineAdapter {
           position,
           rotation: UPRIGHT_ROTATION
         });
+        this.captureModelPointObject(id, previousPoints);
         this.ensureWindLoop();
         this.ensureDepthPointShading();
         this.updateDepthPointShading();
@@ -796,6 +888,7 @@ export class PointcloudEngineAdapter {
     this.modelSpawnPositions.set(id, position);
 
     try {
+      const previousPoints = new Set(this.getPointObjects());
       await this.engine.addModelFromUrl(trimmedUrl, {
         id,
         randomPlacement: false,
@@ -805,6 +898,7 @@ export class PointcloudEngineAdapter {
         position,
         rotation: UPRIGHT_ROTATION
       });
+      this.captureModelPointObject(id, previousPoints);
       this.applyFrontCameraPose();
       this.updateTitleScale();
       this.ensureWindLoop();
@@ -829,10 +923,12 @@ export class PointcloudEngineAdapter {
 
     this.engine.removeModel(id);
     this.modelSpawnPositions.delete(id);
+    this.modelPointObjects.delete(id);
 
     if (!this.engine.getModelIds().length) {
       this.spawnIndex = 0;
       this.modelSpawnPositions.clear();
+      this.modelPointObjects.clear();
       this.stopWindLoop();
     }
 
@@ -843,6 +939,7 @@ export class PointcloudEngineAdapter {
     this.engine.clearModels();
     this.spawnIndex = 0;
     this.modelSpawnPositions.clear();
+    this.modelPointObjects.clear();
     this.stopWindLoop();
   }
 
@@ -906,6 +1003,10 @@ export class PointcloudEngineAdapter {
     }
 
     this.stopWindLoop();
+    if (this.selectiveBloomTimeoutId !== null) {
+      window.clearTimeout(this.selectiveBloomTimeoutId);
+      this.selectiveBloomTimeoutId = null;
+    }
     this.engine.dispose();
     this.disposed = true;
   }

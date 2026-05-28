@@ -97,10 +97,11 @@ interface UsePointcloudEngineResult {
   stats: PointcloudStats;
   notice: EngineNotice | null;
   setNotice: (notice: EngineNotice | null) => void;
-  addFromFiles: (files: FileList | null) => Promise<void>;
-  addFromUrl: (url: string, animationDuration?: number) => Promise<void>;
+  addFromFiles: (files: FileList | null) => Promise<string[]>;
+  addFromUrl: (url: string, animationDuration?: number) => Promise<string | null>;
   removeModel: (id: string) => void;
   resetCamera: () => void;
+  triggerSelectiveBloom: (modelIds: string[], durationMs?: number) => boolean;
   updateControls: (partial: Partial<EngineControlsState>) => void;
 }
 
@@ -231,12 +232,12 @@ export function usePointcloudEngine({
       const engine = engineRef.current;
       if (!engine) {
         setNotice({ type: 'error', text: 'Engine non pronto: attendi il caricamento.' });
-        return;
+        return [];
       }
 
       if (!files || !files.length) {
         setNotice({ type: 'error', text: 'Nessun file selezionato.' });
-        return;
+        return [];
       }
 
       setIsBusy(true);
@@ -247,6 +248,7 @@ export function usePointcloudEngine({
           type: 'success',
           text: `Modelli caricati con successo: ${addedIds.length}.`
         });
+        return addedIds;
       } catch (error) {
         setNotice({ type: 'error', text: parseUserError(error) });
         throw error;
@@ -262,7 +264,7 @@ export function usePointcloudEngine({
       const engine = engineRef.current;
       if (!engine) {
         setNotice({ type: 'error', text: 'Engine non pronto: attendi il caricamento.' });
-        return;
+        return null;
       }
 
       setIsBusy(true);
@@ -273,6 +275,7 @@ export function usePointcloudEngine({
           type: 'success',
           text: `Modello aggiunto da URL con id ${modelId}.`
         });
+        return modelId;
       } catch (error) {
         setNotice({ type: 'error', text: parseUserError(error) });
         throw error;
@@ -341,6 +344,38 @@ export function usePointcloudEngine({
     });
   }, []);
 
+  const triggerSelectiveBloom = useCallback(
+    (modelIds: string[], durationMs = 4200) => {
+      const engine = engineRef.current;
+      if (!engine) {
+        setNotice({ type: 'error', text: 'Engine non pronto: attendi il caricamento.' });
+        return false;
+      }
+
+      const didTrigger = engine.triggerSelectiveBloom(modelIds, durationMs, {
+        bloomEnabled: controls.bloomEnabled,
+        bloomStrength: controls.bloomStrength,
+        bloomRadius: controls.bloomRadius,
+        bloomThreshold: controls.bloomThreshold
+      });
+
+      if (!didTrigger) {
+        setNotice({
+          type: 'info',
+          text: 'Nessuna pianta trovata per il QR appena letto.'
+        });
+        return false;
+      }
+
+      setNotice({
+        type: 'success',
+        text: `Bloom attivato su ${modelIds.length} piante.`
+      });
+      return true;
+    },
+    [controls.bloomEnabled, controls.bloomRadius, controls.bloomStrength, controls.bloomThreshold]
+  );
+
   return {
     isReady,
     isBusy,
@@ -353,6 +388,7 @@ export function usePointcloudEngine({
     addFromUrl,
     removeModel,
     resetCamera,
+    triggerSelectiveBloom,
     updateControls
   };
 }

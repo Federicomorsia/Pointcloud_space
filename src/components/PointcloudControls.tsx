@@ -10,8 +10,8 @@ interface PointcloudControlsProps {
   notice: EngineNotice | null;
   isHidden: boolean;
   onDismissNotice: () => void;
-  onAddFiles: (files: FileList | null) => Promise<void>;
-  onAddUrl: (url: string, animationDuration?: number) => Promise<void>;
+  onAddFiles: (files: FileList | null) => Promise<unknown>;
+  onAddUrl: (url: string, animationDuration?: number) => Promise<unknown>;
   onRemoveModel: (id: string) => void;
   onUpdateControls: (partial: Partial<EngineControlsState>) => void;
   onToggleVisibility: () => void;
@@ -58,7 +58,9 @@ export function PointcloudControls({
   const handleLoadDebugModels = async () => {
     setIsLoadingDebug(true);
     try {
-      await loadDebugModels(onAddUrl, (message, type) => {
+      await loadDebugModels(async (url, animationDuration) => {
+        await onAddUrl(url, animationDuration);
+      }, (message, type) => {
         // Feedback visuale dei messaggi di caricamento
         console.log(`[${type.toUpperCase()}] ${message}`);
       });

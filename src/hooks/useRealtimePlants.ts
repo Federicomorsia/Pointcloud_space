@@ -17,6 +17,7 @@ export type RealtimePlant = {
   eventId: string;
   modelKey: string;
   modelUrl: string;
+  modelId: string;
   userId: string | null;
   qrCode: string | null;
   createdAt: string | null;
@@ -24,17 +25,20 @@ export type RealtimePlant = {
 
 interface UseRealtimePlantsArgs {
   isReady: boolean;
-  onAddUrl: (url: string, animationDuration?: number) => Promise<void>;
+  onAddUrl: (url: string, animationDuration?: number) => Promise<string | null>;
+  onTriggerBloom: (modelIds: string[], durationMs?: number) => boolean;
   onNotice: (notice: EngineNotice | null) => void;
 }
 
 export function useRealtimePlants({
   isReady,
   onAddUrl,
+  onTriggerBloom,
   onNotice
 }: UseRealtimePlantsArgs) {
   const loadedEventIdsRef = useRef(new Set<string>());
   const loadedPlantKeysRef = useRef(new Set<string>());
+  const plantsByUserIdRef = useRef(new Map<string, string[]>());
   const [plants, setPlants] = useState<RealtimePlant[]>([]);
 
   useEffect(() => {
@@ -53,6 +57,21 @@ export function useRealtimePlants({
     const handleScanEvent = async (event: QrScanEvent) => {
       const eventId = event.id ?? `${event.qr_code ?? 'qr'}-${event.created_at ?? Date.now()}`;
       const plantKey = event.qr_code ?? event.model_key ?? event.model_url ?? eventId;
+
+      if (event.source === 'garden-bloom-scanner') {
+        const userId = event.scanned_by;
+        if (!userId) {
+          onNotice({
+            type: 'error',
+            text: 'QR letto, ma manca scanned_by per associare il bloom.'
+          });
+          return;
+        }
+
+        const modelIds = plantsByUserIdRef.current.get(userId) ?? [];
+        onTriggerBloom(modelIds, 4200);
+        return;
+      }
 
       if (loadedEventIdsRef.current.has(eventId)) {
         return;
@@ -82,10 +101,21 @@ export function useRealtimePlants({
 
       loadedEventIdsRef.current.add(eventId);
       loadedPlantKeysRef.current.add(plantKey);
+      let modelId: string | null = null;
       try {
-        await onAddUrl(modelUrl, 600);
+        modelId = await onAddUrl(modelUrl, 600);
+        if (!modelId) {
+          return;
+        }
+
+        if (event.scanned_by) {
+          const userPlants = plantsByUserIdRef.current.get(event.scanned_by) ?? [];
+          plantsByUserIdRef.current.set(event.scanned_by, [...userPlants, modelId]);
+        }
+
         console.info('[Piantala realtime] Modello caricato', {
           eventId,
+          modelId,
           modelUrl,
           userId: event.scanned_by
         });
@@ -106,6 +136,7 @@ export function useRealtimePlants({
           eventId,
           modelKey: event.model_key ?? '',
           modelUrl,
+          modelId,
           userId: event.scanned_by ?? null,
           qrCode: event.qr_code ?? null,
           createdAt: event.created_at ?? null
@@ -152,7 +183,7 @@ export function useRealtimePlants({
     return () => {
       void client.removeChannel(channel);
     };
-  }, [isReady, onAddUrl, onNotice]);
+  }, [isReady, onAddUrl, onNotice, onTriggerBloom]);
 
   return {
     plants,

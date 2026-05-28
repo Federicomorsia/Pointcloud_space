@@ -105,6 +105,40 @@ La tabella ascoltata e `public.qr_scan_events`. Ogni insert deve avere questo fo
 
 Quando arriva un evento realtime, il sito risolve `model_key` su un file locale in `public/models` e carica il modello con il motore pointcloud. Il campo `scanned_by` viene conservato nello stato realtime per collegare ogni pianta all'utente che l'ha aggiunta.
 
+### Scanner QR per Bloom Utente
+
+La pagina `/scanner` usa lo smartphone come lettore QR e inserisce un evento speciale nella stessa tabella `public.qr_scan_events`. Il giardino riconosce gli eventi con `source: "garden-bloom-scanner"` e applica temporaneamente il bloom solo alle piante gia associate allo stesso `scanned_by`.
+
+Evento inserito dallo scanner:
+
+```json
+{
+  "qr_code": "biglietto-001",
+  "model_key": "__bloom__",
+  "model_url": "__bloom__",
+  "scanned_by": "uuid-utente-supabase",
+  "source": "garden-bloom-scanner"
+}
+```
+
+Gli eventi normali continuano invece a caricare piante quando hanno `model_key` o `model_url`.
+
+Lo scanner accetta QR in questi formati:
+
+```txt
+user_id:uuid-utente
+```
+
+```json
+{"user_id":"uuid-utente","ticket_token":"biglietto-001"}
+```
+
+```txt
+https://tuosito.it/ticket?user_id=uuid-utente&ticket_token=biglietto-001
+```
+
+Nota: per usare la camera serve HTTPS o `localhost`. Se il browser non supporta `BarcodeDetector`, la pagina mostra comunque il campo manuale per testare l'invio.
+
 Per il test end-to-end:
 
 1. Avvia questo sito con `npm run dev`.
