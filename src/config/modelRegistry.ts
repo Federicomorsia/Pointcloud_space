@@ -42,6 +42,14 @@ export function resolveLocalModelUrl(modelKey?: string | null, modelUrl?: string
     return exact.url;
   }
 
+  const numericAlias = key.match(/(\d+)$/)?.[1]?.replace(/^0+/, '') || null;
+  if (numericAlias) {
+    const numericExact = modelEntries.find((entry) => entry.normalized === numericAlias);
+    if (numericExact) {
+      return numericExact.url;
+    }
+  }
+
   const partial = modelEntries.find((entry) => {
     return entry.normalized.includes(key) || key.includes(entry.normalized);
   });

@@ -7,14 +7,14 @@ import type {
 
 const FILE_MODEL_EXTENSIONS = new Set(['obj', 'glb']);
 const URL_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'gltf']);
-const MODEL_SCALE = 0.72;
-const SPAWN_MIN_RADIUS = 1.15;
-const SPAWN_MAX_RADIUS = 3.85;
-const SPAWN_X_RADIUS_FACTOR = 1.25;
-const SPAWN_Y_RADIUS_FACTOR = 0.74;
-const SPAWN_CENTER_CLEAR_RADIUS = 0.92;
-const SPAWN_MIN_DISTANCE_XY = 1.32;
-const SPAWN_CANDIDATE_LIMIT = 240;
+const MODEL_SCALE = 0.76;
+const SPAWN_MIN_RADIUS = 0.85;
+const SPAWN_MAX_RADIUS = 3.05;
+const SPAWN_X_RADIUS_FACTOR = 1.06;
+const SPAWN_Y_RADIUS_FACTOR = 0.64;
+const SPAWN_CENTER_CLEAR_RADIUS = 0.82;
+const SPAWN_COLLISION_PADDING = 0.18;
+const SPAWN_CANDIDATE_LIMIT = 1400;
 const SPAWN_DEPTH_LAYERS = [1.7, 1.1, 0.4, -0.2, -0.75] as const;
 const DEPTH_FOG_COLOR = '#000000';
 const UPRIGHT_ROTATION = { x: -Math.PI / 2, y: 0, z: 0 };
@@ -38,6 +38,13 @@ interface WindGustState {
   peakStrength: number;
 }
 
+interface PlantFootprint {
+  x: number;
+  y: number;
+  z: number;
+  radius: number;
+}
+
 export interface ViewDebugOptions {
   cameraX: number;
   cameraY: number;
@@ -50,7 +57,7 @@ export interface ViewDebugOptions {
 export const DEFAULT_VIEW_DEBUG: ViewDebugOptions = {
   cameraX: 0,
   cameraY: 0,
-  cameraZ: 8.8,
+  cameraZ: 10.8,
   targetX: 0,
   targetY: 0,
   targetZ: 0
@@ -132,6 +139,16 @@ function randomBetween(min: number, max: number): number {
   return min + Math.random() * (max - min);
 }
 
+function makeObjectDarkenableInBloomPass(object: any): void {
+  if (!object || object.isPoints || object.isMesh) {
+    return;
+  }
+
+  // The upstream bloom pass darkens non-bloomed Mesh/Points only.
+  // Mark sprites as mesh-like so logos/titles are also excluded from selective bloom.
+  object.isMesh = true;
+}
+
 export class PointcloudEngineAdapter {
   private readonly engine: PointcloudEngine;
 
@@ -139,7 +156,7 @@ export class PointcloudEngineAdapter {
 
   private spawnIndex = 0;
 
-  private readonly modelSpawnPositions = new Map<string, { x: number; y: number; z: number }>();
+  private readonly modelSpawnPositions = new Map<string, PlantFootprint>();
 
   private readonly modelPointObjects = new Map<string, any>();
 
@@ -289,6 +306,23 @@ export class PointcloudEngineAdapter {
       }
     }
 
+    const targetPointObjects = new Set(
+      [...targetIds]
+        .map((modelId) => this.modelPointObjects.get(modelId))
+        .filter(Boolean)
+    );
+
+    const scene = (this.engine as any).scene;
+    if (scene && typeof scene.traverse === 'function') {
+      scene.traverse((object: any) => {
+        if (!object?.layers || targetPointObjects.has(object)) {
+          return;
+        }
+
+        object.layers.disable(BLOOM_LAYER);
+      });
+    }
+
     this.engine.setOptions({
       bloomEnabled: true,
       bloomStrength: QR_BLOOM_STRENGTH,
@@ -349,6 +383,7 @@ export class PointcloudEngineAdapter {
     });
 
     const sprite = new THREE.Sprite(spriteMaterial);
+    makeObjectDarkenableInBloomPass(sprite);
     sprite.position.set(0, 0, 0.1);
 
     scene.add(sprite);
@@ -394,6 +429,7 @@ export class PointcloudEngineAdapter {
     });
 
     const sprite = new THREE.Sprite(spriteMaterial);
+    makeObjectDarkenableInBloomPass(sprite);
     sprite.position.set(0, 0, 0.1);
 
     scene.add(sprite);
@@ -750,6 +786,9 @@ export class PointcloudEngineAdapter {
   }
 
   private nextSpawnPosition(): { x: number; y: number; z: number } {
+    let bestCandidate: { x: number; y: number; z: number } | null = null;
+    let bestClearance = -Infinity;
+
     for (let attempt = 0; attempt < SPAWN_CANDIDATE_LIMIT; attempt += 1) {
       const depthIndex = (this.spawnIndex + attempt) % SPAWN_DEPTH_LAYERS.length;
       const angle = Math.random() * Math.PI * 2;
@@ -766,21 +805,19 @@ export class PointcloudEngineAdapter {
         this.spawnIndex += attempt + 1;
         return candidate;
       }
+
+      const clearance = this.getSpawnClearance(candidate);
+      if (clearance > bestClearance) {
+        bestClearance = clearance;
+        bestCandidate = candidate;
+      }
     }
 
-    // Fallback: evita blocchi anche con molte piante caricate.
-    const fallbackAngle = Math.random() * Math.PI * 2;
-    const fallbackRadius = randomBetween(SPAWN_MIN_RADIUS, SPAWN_MAX_RADIUS);
-    const fallback = {
-      x: Math.cos(fallbackAngle) * fallbackRadius * SPAWN_X_RADIUS_FACTOR,
-      y: Math.sin(fallbackAngle) * fallbackRadius * SPAWN_Y_RADIUS_FACTOR,
-      z: SPAWN_DEPTH_LAYERS[Math.floor(Math.random() * SPAWN_DEPTH_LAYERS.length)]
-    };
     this.spawnIndex += 1;
-    return fallback;
+    return bestCandidate ?? { x: 0, y: 0, z: SPAWN_DEPTH_LAYERS[0] };
   }
 
-  private buildScaleForDepth(depthZ: number): { x: number; y: number; z: number } {
+  private buildScaleMultiplierForDepth(depthZ: number): number {
     let multiplier = 0.62;
 
     if (depthZ >= 1.4) {
@@ -795,24 +832,50 @@ export class PointcloudEngineAdapter {
       multiplier = 0.68;
     }
 
+    return multiplier;
+  }
+
+  private buildScaleForDepth(depthZ: number): { x: number; y: number; z: number } {
+    const multiplier = this.buildScaleMultiplierForDepth(depthZ);
     const scale = MODEL_SCALE * multiplier;
     return { x: scale, y: scale, z: scale };
   }
 
-  private isSpawnPositionFree(candidate: { x: number; y: number; z: number }): boolean {
+  private buildFootprintForPosition(position: { x: number; y: number; z: number }): PlantFootprint {
+    const scaleMultiplier = this.buildScaleMultiplierForDepth(position.z);
+
+    return {
+      ...position,
+      radius: MODEL_SCALE * scaleMultiplier * 0.98
+    };
+  }
+
+  private getSpawnClearance(candidate: { x: number; y: number; z: number }): number {
+    const candidateFootprint = this.buildFootprintForPosition(candidate);
+
     if (Math.hypot(candidate.x, candidate.y) < SPAWN_CENTER_CLEAR_RADIUS) {
-      return false;
+      return -Infinity;
     }
 
+    if (!this.modelSpawnPositions.size) {
+      return Infinity;
+    }
+
+    let minClearance = Infinity;
     for (const occupied of this.modelSpawnPositions.values()) {
       const dx = occupied.x - candidate.x;
       const dy = occupied.y - candidate.y;
-      if (Math.hypot(dx, dy) < SPAWN_MIN_DISTANCE_XY) {
-        return false;
-      }
+      const requiredDistance =
+        occupied.radius + candidateFootprint.radius + SPAWN_COLLISION_PADDING;
+      const clearance = Math.hypot(dx, dy) - requiredDistance;
+      minClearance = Math.min(minClearance, clearance);
     }
 
-    return true;
+    return minClearance;
+  }
+
+  private isSpawnPositionFree(candidate: { x: number; y: number; z: number }): boolean {
+    return this.getSpawnClearance(candidate) >= 0;
   }
 
   async addModelsFromFiles(files: FileList | File[], animationDuration = 1200): Promise<string[]> {
@@ -836,7 +899,7 @@ export class PointcloudEngineAdapter {
       const id = buildModelId(file.name);
       const position = this.nextSpawnPosition();
       const scale = this.buildScaleForDepth(position.z);
-      this.modelSpawnPositions.set(id, position);
+      this.modelSpawnPositions.set(id, this.buildFootprintForPosition(position));
       try {
         const previousPoints = new Set(this.getPointObjects());
         await this.engine.addModelFromFile(file, {
@@ -885,7 +948,7 @@ export class PointcloudEngineAdapter {
     const id = buildModelId(trimmedUrl);
     const position = this.nextSpawnPosition();
     const scale = this.buildScaleForDepth(position.z);
-    this.modelSpawnPositions.set(id, position);
+    this.modelSpawnPositions.set(id, this.buildFootprintForPosition(position));
 
     try {
       const previousPoints = new Set(this.getPointObjects());

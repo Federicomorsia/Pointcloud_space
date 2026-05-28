@@ -147,8 +147,9 @@ export function useRealtimePlants({
     client
       .from('qr_scan_events')
       .select('id,qr_code,model_key,model_url,scanned_by,source,created_at')
+      .or('source.is.null,source.neq.garden-bloom-scanner')
       .order('created_at', { ascending: false })
-      .limit(10)
+      .limit(80)
       .then(({ data, error }) => {
         if (error) {
           console.error('[Piantala realtime] Errore caricamento eventi iniziali', error);
