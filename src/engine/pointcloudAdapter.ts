@@ -2,11 +2,12 @@ import { loadCreatePointcloudEngine } from './loadEngineFactory';
 import logoPiantalaUrl from '../logo piantala.png';
 import type {
   PointcloudEngine,
-  PointcloudEngineOptions
+  PointcloudEngineOptions,
+  PointcloudRawModel
 } from './pointcloudEngineTypes';
 
-const FILE_MODEL_EXTENSIONS = new Set(['obj', 'glb']);
-const URL_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'gltf']);
+const FILE_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'ply']);
+const URL_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'gltf', 'ply']);
 const MODEL_SCALE = 0.76;
 const SPAWN_MIN_RADIUS = 0.85;
 const SPAWN_MAX_RADIUS = 3.05;
@@ -137,6 +138,120 @@ function normalizeEngineError(error: unknown, fallback: string): Error {
 
 function randomBetween(min: number, max: number): number {
   return min + Math.random() * (max - min);
+}
+
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+
+  return Math.max(0, Math.min(1, value));
+}
+
+function normalizePlyRawModel(
+  positions: Float32Array,
+  normals: Float32Array,
+  colors: Float32Array
+): PointcloudRawModel {
+  let minX = Infinity;
+  let minY = Infinity;
+  let minZ = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let maxZ = -Infinity;
+
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i];
+    const y = positions[i + 1];
+    const z = positions[i + 2];
+
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (z < minZ) minZ = z;
+    if (x > maxX) maxX = x;
+    if (y > maxY) maxY = y;
+    if (z > maxZ) maxZ = z;
+  }
+
+  const centerX = (minX + maxX) * 0.5;
+  const centerY = (minY + maxY) * 0.5;
+  const centerZ = (minZ + maxZ) * 0.5;
+  const maxSize = Math.max(
+    1e-6,
+    maxX - minX,
+    maxY - minY,
+    maxZ - minZ
+  );
+  const scale = 2 / maxSize;
+
+  for (let i = 0; i < positions.length; i += 3) {
+    const normalizedX = (positions[i] - centerX) * scale;
+    const normalizedY = (positions[i + 1] - centerY) * scale;
+    const normalizedZ = (positions[i + 2] - centerZ) * scale;
+
+    positions[i] = normalizedX;
+    positions[i + 1] = -normalizedZ;
+    positions[i + 2] = normalizedY;
+
+    const normalY = normals[i + 1];
+    const normalZ = normals[i + 2];
+    normals[i + 1] = -normalZ;
+    normals[i + 2] = normalY;
+
+    const normalLength = Math.hypot(normals[i], normals[i + 1], normals[i + 2]) || 1;
+    normals[i] /= normalLength;
+    normals[i + 1] /= normalLength;
+    normals[i + 2] /= normalLength;
+
+    colors[i] = clamp01(colors[i]);
+    colors[i + 1] = clamp01(colors[i + 1]);
+    colors[i + 2] = clamp01(colors[i + 2]);
+  }
+
+  return {
+    positions,
+    normals,
+    colors,
+    pointCount: positions.length / 3
+  };
+}
+
+async function parsePlyRawModel(arrayBuffer: ArrayBuffer): Promise<PointcloudRawModel> {
+  const [{ PLYLoader }] = await Promise.all([
+    import('three/examples/jsm/loaders/PLYLoader.js')
+  ]);
+  const loader = new PLYLoader();
+  const geometry = loader.parse(arrayBuffer);
+  const positionAttribute = geometry.getAttribute('position');
+
+  if (!positionAttribute?.count) {
+    throw new Error('PLY senza punti leggibili.');
+  }
+
+  const pointCount = positionAttribute.count;
+  const positions = new Float32Array(pointCount * 3);
+  const normals = new Float32Array(pointCount * 3);
+  const colors = new Float32Array(pointCount * 3);
+  const normalAttribute = geometry.getAttribute('normal');
+  const colorAttribute = geometry.getAttribute('color');
+
+  for (let index = 0; index < pointCount; index += 1) {
+    const target = index * 3;
+    positions[target] = positionAttribute.getX(index);
+    positions[target + 1] = positionAttribute.getY(index);
+    positions[target + 2] = positionAttribute.getZ(index);
+
+    normals[target] = normalAttribute?.getX(index) ?? 0;
+    normals[target + 1] = normalAttribute?.getY(index) ?? 0;
+    normals[target + 2] = normalAttribute?.getZ(index) ?? 1;
+
+    colors[target] = colorAttribute?.getX(index) ?? 1;
+    colors[target + 1] = colorAttribute?.getY(index) ?? 1;
+    colors[target + 2] = colorAttribute?.getZ(index) ?? 1;
+  }
+
+  geometry.dispose();
+  return normalizePlyRawModel(positions, normals, colors);
 }
 
 function makeObjectDarkenableInBloomPass(object: any): void {
@@ -892,7 +1007,7 @@ export class PointcloudEngineAdapter {
       const extension = getExtension(file.name);
       if (!FILE_MODEL_EXTENSIONS.has(extension)) {
         throw new Error(
-          `Formato non valido per "${file.name}". Usa file .obj o .glb.`
+          `Formato non valido per "${file.name}". Usa file .obj, .glb o .ply.`
         );
       }
 
@@ -902,7 +1017,7 @@ export class PointcloudEngineAdapter {
       this.modelSpawnPositions.set(id, this.buildFootprintForPosition(position));
       try {
         const previousPoints = new Set(this.getPointObjects());
-        await this.engine.addModelFromFile(file, {
+        const addOptions = {
           id,
           randomPlacement: false,
           frame: false,
@@ -910,7 +1025,17 @@ export class PointcloudEngineAdapter {
           scale,
           position,
           rotation: UPRIGHT_ROTATION
-        });
+        };
+
+        if (extension === 'ply') {
+          if (!this.engine.addModelFromRawModel) {
+            throw new Error('Il motore pointcloud non supporta modelli raw PLY.');
+          }
+          const rawModel = await parsePlyRawModel(await file.arrayBuffer());
+          this.engine.addModelFromRawModel(rawModel, addOptions);
+        } else {
+          await this.engine.addModelFromFile(file, addOptions);
+        }
         this.captureModelPointObject(id, previousPoints);
         this.ensureWindLoop();
         this.ensureDepthPointShading();
@@ -942,7 +1067,7 @@ export class PointcloudEngineAdapter {
 
     const extension = getUrlExtension(trimmedUrl);
     if (!URL_MODEL_EXTENSIONS.has(extension)) {
-      throw new Error('Formato URL non valido. Usa .obj, .glb o .gltf.');
+      throw new Error('Formato URL non valido. Usa .obj, .glb, .gltf o .ply.');
     }
 
     const id = buildModelId(trimmedUrl);
@@ -952,7 +1077,7 @@ export class PointcloudEngineAdapter {
 
     try {
       const previousPoints = new Set(this.getPointObjects());
-      await this.engine.addModelFromUrl(trimmedUrl, {
+      const addOptions = {
         id,
         randomPlacement: false,
         frame: false,
@@ -960,7 +1085,21 @@ export class PointcloudEngineAdapter {
         scale,
         position,
         rotation: UPRIGHT_ROTATION
-      });
+      };
+
+      if (extension === 'ply') {
+        if (!this.engine.addModelFromRawModel) {
+          throw new Error('Il motore pointcloud non supporta modelli raw PLY.');
+        }
+        const response = await fetch(trimmedUrl);
+        if (!response.ok) {
+          throw new Error(`Impossibile caricare PLY: ${response.status}`);
+        }
+        const rawModel = await parsePlyRawModel(await response.arrayBuffer());
+        this.engine.addModelFromRawModel(rawModel, addOptions);
+      } else {
+        await this.engine.addModelFromUrl(trimmedUrl, addOptions);
+      }
       this.captureModelPointObject(id, previousPoints);
       this.applyFrontCameraPose();
       this.updateTitleScale();

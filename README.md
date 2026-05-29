@@ -148,8 +148,8 @@ Per il test end-to-end:
 
 ## Controlli disponibili
 
-- Aggiungi modelli da file (`.obj`, `.glb`) con upload multiplo
-- Aggiungi modello da URL (`.obj`, `.glb`, `.gltf`)
+- Aggiungi modelli da file (`.obj`, `.glb`, `.ply`) con upload multiplo
+- Aggiungi modello da URL (`.obj`, `.glb`, `.gltf`, `.ply`)
 - Rimuovi modello per `id`
 - Reset camera
 - Toggle auto-rotate
@@ -176,7 +176,7 @@ Messaggi utente espliciti per i casi principali:
 ## Checklist verifica manuale
 
 1. Avvia app e verifica che lo stage sia visibile e senza errori in console.
-2. Carica 2 o piu file validi (`.obj/.glb`) e conferma che appaiano tutti in point cloud.
+2. Carica 2 o piu file validi (`.obj/.glb/.ply`) e conferma che appaiano tutti in point cloud.
 3. Verifica disposizione casuale nello spazio tra caricamenti multipli.
 4. Usa `reset camera` e controlla framing su tutti i modelli.
 5. Attiva/disattiva `auto-rotate` e controlla effetto immediato.

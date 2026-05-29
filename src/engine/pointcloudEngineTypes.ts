@@ -38,6 +38,13 @@ export interface PointcloudModelAddOptions {
   position?: { x: number; y: number; z: number };
 }
 
+export interface PointcloudRawModel {
+  positions: Float32Array;
+  normals: Float32Array;
+  colors: Float32Array;
+  pointCount: number;
+}
+
 export interface PointcloudEngine {
   scene?: unknown;
   renderer?: {
@@ -63,6 +70,10 @@ export interface PointcloudEngine {
     url: string,
     options?: PointcloudModelAddOptions
   ) => Promise<unknown>;
+  addModelFromRawModel?: (
+    rawModel: PointcloudRawModel,
+    options?: PointcloudModelAddOptions
+  ) => unknown;
   removeModel: (id: string) => void;
   clearModels: () => void;
   getModelIds: () => string[];

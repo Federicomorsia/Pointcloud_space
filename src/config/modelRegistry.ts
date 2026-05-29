@@ -1,5 +1,5 @@
 const modelModules = import.meta.glob<string>(
-  '/public/models/*.{glb,obj,gltf}',
+  '/public/models/*.{glb,obj,gltf,ply}',
   { query: '?url', import: 'default', eager: true }
 );
 
@@ -9,7 +9,7 @@ const normalizeModelKey = (value: string) =>
     .split('#')[0]
     .split('/')
     .pop()
-    ?.replace(/\.(obj|glb|gltf)$/i, '')
+    ?.replace(/\.(obj|glb|gltf|ply)$/i, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '')
     .trim() ?? '';

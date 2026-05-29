@@ -105,7 +105,7 @@ export function PointcloudControls({
             <span>Load Files</span>
             <input
               type="file"
-              accept=".obj,.glb"
+              accept=".obj,.glb,.ply"
               multiple
               onChange={handleFileInput}
               disabled={isBusy}

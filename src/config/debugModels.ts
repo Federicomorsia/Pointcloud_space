@@ -7,7 +7,7 @@
 
 // Glob automatico dei modelli disponibili
 const modelModules = import.meta.glob<string>(
-  '/public/models/*.{glb,obj}',
+  '/public/models/*.{glb,obj,ply}',
   { query: '?url', import: 'default', eager: true }
 );
 
