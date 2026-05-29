@@ -31,15 +31,15 @@ export interface EngineControlsState extends EngineRuntimeOptions {
 }
 
 const DEFAULT_CONTROLS: EngineControlsState = {
-  pointDensity: 1,
+  pointDensity: 18,
   pointSize: 0.01,
-  exposure: 1.18,
+  exposure: 5,
   saturation: 1.14,
   autoRotate: false,
   bloomEnabled: false,
-  bloomStrength: 0,
+  bloomStrength: 0.45,
   bloomRadius: 0,
-  bloomThreshold: 0.55,
+  bloomThreshold: 0.15,
   ...DEFAULT_VIEW_DEBUG
 };
 

@@ -13,6 +13,11 @@ type QrScanEvent = {
   created_at?: string;
 };
 
+function normalizeUserId(userId?: string | null): string | null {
+  const normalized = userId?.trim().toLowerCase();
+  return normalized || null;
+}
+
 export type RealtimePlant = {
   eventId: string;
   modelKey: string;
@@ -37,7 +42,6 @@ export function useRealtimePlants({
   onNotice
 }: UseRealtimePlantsArgs) {
   const loadedEventIdsRef = useRef(new Set<string>());
-  const loadedPlantKeysRef = useRef(new Set<string>());
   const plantsByUserIdRef = useRef(new Map<string, string[]>());
   const [plants, setPlants] = useState<RealtimePlant[]>([]);
 
@@ -56,10 +60,9 @@ export function useRealtimePlants({
 
     const handleScanEvent = async (event: QrScanEvent) => {
       const eventId = event.id ?? `${event.qr_code ?? 'qr'}-${event.created_at ?? Date.now()}`;
-      const plantKey = event.qr_code ?? event.model_key ?? event.model_url ?? eventId;
 
       if (event.source === 'garden-bloom-scanner') {
-        const userId = event.scanned_by;
+        const userId = normalizeUserId(event.scanned_by);
         if (!userId) {
           onNotice({
             type: 'error',
@@ -69,15 +72,16 @@ export function useRealtimePlants({
         }
 
         const modelIds = plantsByUserIdRef.current.get(userId) ?? [];
+        console.info('[Piantala realtime] Bloom richiesto', {
+          userId,
+          modelIds,
+          knownUsers: Array.from(plantsByUserIdRef.current.keys())
+        });
         onTriggerBloom(modelIds, 4200);
         return;
       }
 
       if (loadedEventIdsRef.current.has(eventId)) {
-        return;
-      }
-
-      if (loadedPlantKeysRef.current.has(plantKey)) {
         return;
       }
 
@@ -100,7 +104,6 @@ export function useRealtimePlants({
       }
 
       loadedEventIdsRef.current.add(eventId);
-      loadedPlantKeysRef.current.add(plantKey);
       let modelId: string | null = null;
       try {
         modelId = await onAddUrl(modelUrl, 600);
@@ -108,9 +111,10 @@ export function useRealtimePlants({
           return;
         }
 
-        if (event.scanned_by) {
-          const userPlants = plantsByUserIdRef.current.get(event.scanned_by) ?? [];
-          plantsByUserIdRef.current.set(event.scanned_by, [...userPlants, modelId]);
+        const userId = normalizeUserId(event.scanned_by);
+        if (userId) {
+          const userPlants = plantsByUserIdRef.current.get(userId) ?? [];
+          plantsByUserIdRef.current.set(userId, [...userPlants, modelId]);
         }
 
         console.info('[Piantala realtime] Modello caricato', {
@@ -126,7 +130,6 @@ export function useRealtimePlants({
           error
         });
         loadedEventIdsRef.current.delete(eventId);
-        loadedPlantKeysRef.current.delete(plantKey);
         return;
       }
 

@@ -8,17 +8,21 @@ import type {
 
 const FILE_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'ply']);
 const URL_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'gltf', 'ply']);
-const MODEL_SCALE = 0.76;
-const SPAWN_MIN_RADIUS = 0.85;
-const SPAWN_MAX_RADIUS = 3.05;
-const SPAWN_X_RADIUS_FACTOR = 1.06;
-const SPAWN_Y_RADIUS_FACTOR = 0.64;
-const SPAWN_CENTER_CLEAR_RADIUS = 0.82;
-const SPAWN_COLLISION_PADDING = 0.18;
-const SPAWN_CANDIDATE_LIMIT = 1400;
-const SPAWN_DEPTH_LAYERS = [1.7, 1.1, 0.4, -0.2, -0.75] as const;
+const MODEL_SCALE = 3.8;
+const SPAWN_X_LIMIT = 20.5;
+const SPAWN_Y_BANDS = [
+  { min: -14.2, max: -4.6 },
+  { min: 4.6, max: 14.2 }
+] as const;
+const SPAWN_EDGE_PROBABILITY = 0.28;
+const SPAWN_CENTER_CLEAR_RADIUS = 3.7;
+const SPAWN_CENTER_FOOTPRINT_FACTOR = 0.36;
+const SPAWN_COLLISION_PADDING = 1.75;
+const SPAWN_CANDIDATE_LIMIT = 5200;
+const SPAWN_DEPTH_LAYERS = [0.45, 0.2, 0, -0.2, -0.45] as const;
 const DEPTH_FOG_COLOR = '#000000';
-const UPRIGHT_ROTATION = { x: -Math.PI / 2, y: 0, z: 0 };
+const MESH_MODEL_ROTATION = { x: -Math.PI / 2, y: -Math.PI / 6, z: 0 };
+const PLY_MODEL_ROTATION = { x: 0, y: -Math.PI / 6, z: 0 };
 const WIND_UPDATE_FPS = 24;
 const WIND_INTERVAL_MIN_MS = 6800;
 const WIND_INTERVAL_MAX_MS = 15200;
@@ -28,9 +32,6 @@ const WIND_BASE_AMPLITUDE = 1.6;
 const WIND_GUST_MIN = 0.4;
 const WIND_GUST_MAX = 1.4;
 const BLOOM_LAYER = 1;
-const QR_BLOOM_STRENGTH = 1.65;
-const QR_BLOOM_RADIUS = 0.32;
-const QR_BLOOM_THRESHOLD = 0.08;
 
 interface WindGustState {
   nextAtMs: number;
@@ -58,7 +59,7 @@ export interface ViewDebugOptions {
 export const DEFAULT_VIEW_DEBUG: ViewDebugOptions = {
   cameraX: 0,
   cameraY: 0,
-  cameraZ: 10.8,
+  cameraZ: 44,
   targetX: 0,
   targetY: 0,
   targetZ: 0
@@ -190,12 +191,12 @@ function normalizePlyRawModel(
     const normalizedZ = (positions[i + 2] - centerZ) * scale;
 
     positions[i] = normalizedX;
-    positions[i + 1] = -normalizedZ;
+    positions[i + 1] = normalizedZ;
     positions[i + 2] = normalizedY;
 
     const normalY = normals[i + 1];
     const normalZ = normals[i + 2];
-    normals[i + 1] = -normalZ;
+    normals[i + 1] = normalZ;
     normals[i + 2] = normalY;
 
     const normalLength = Math.hypot(normals[i], normals[i + 1], normals[i + 2]) || 1;
@@ -264,6 +265,14 @@ function makeObjectDarkenableInBloomPass(object: any): void {
   object.isMesh = true;
 }
 
+function getModelRotation(extension: string): { x: number; y: number; z: number } {
+  return extension === 'ply' ? PLY_MODEL_ROTATION : MESH_MODEL_ROTATION;
+}
+
+function hasBloomLayer(object: any): boolean {
+  return Boolean(object?.layers?.mask & (1 << BLOOM_LAYER));
+}
+
 export class PointcloudEngineAdapter {
   private readonly engine: PointcloudEngine;
 
@@ -309,6 +318,8 @@ export class PointcloudEngineAdapter {
 
   private selectiveBloomTimeoutId: number | null = null;
 
+  private selectiveBloomLayerSnapshot: Array<{ object: any; hadBloomLayer: boolean }> = [];
+
   private constructor(engine: PointcloudEngine, stage: HTMLElement) {
     this.engine = engine;
     this.stage = stage;
@@ -326,13 +337,13 @@ export class PointcloudEngineAdapter {
       canvas,
       stage,
       autostart: true,
-      pointDensity: 1,
+      pointDensity: 18,
       pointSize: 0.01,
       autoRotate: false,
       bloomEnabled: false,
-      bloomStrength: 0,
+      bloomStrength: 0.45,
       bloomRadius: 0,
-      bloomThreshold: 0.55,
+      bloomThreshold: 0.15,
       randomPlacementRange: 5,
       randomPlacementPadding: 1.6,
       randomPlacementAttempts: 200,
@@ -385,6 +396,21 @@ export class PointcloudEngineAdapter {
   }
 
   private restoreAllModelBloomLayers(): void {
+    if (this.selectiveBloomLayerSnapshot.length) {
+      for (const { object, hadBloomLayer } of this.selectiveBloomLayerSnapshot) {
+        if (!object?.layers) {
+          continue;
+        }
+
+        if (hadBloomLayer) {
+          object.layers.enable(BLOOM_LAYER);
+        } else {
+          object.layers.disable(BLOOM_LAYER);
+        }
+      }
+      this.selectiveBloomLayerSnapshot = [];
+    }
+
     for (const point of this.modelPointObjects.values()) {
       if (typeof point?.layers?.enable === 'function') {
         point.layers.enable(BLOOM_LAYER);
@@ -407,6 +433,22 @@ export class PointcloudEngineAdapter {
     if (this.selectiveBloomTimeoutId !== null) {
       window.clearTimeout(this.selectiveBloomTimeoutId);
       this.selectiveBloomTimeoutId = null;
+      this.restoreAllModelBloomLayers();
+    }
+
+    this.selectiveBloomLayerSnapshot = [];
+    const scene = (this.engine as any).scene;
+    if (scene && typeof scene.traverse === 'function') {
+      scene.traverse((object: any) => {
+        if (!object?.layers) {
+          return;
+        }
+
+        this.selectiveBloomLayerSnapshot.push({
+          object,
+          hadBloomLayer: hasBloomLayer(object)
+        });
+      });
     }
 
     for (const [modelId, point] of this.modelPointObjects.entries()) {
@@ -421,29 +463,19 @@ export class PointcloudEngineAdapter {
       }
     }
 
-    const targetPointObjects = new Set(
-      [...targetIds]
-        .map((modelId) => this.modelPointObjects.get(modelId))
-        .filter(Boolean)
-    );
-
-    const scene = (this.engine as any).scene;
-    if (scene && typeof scene.traverse === 'function') {
-      scene.traverse((object: any) => {
-        if (!object?.layers || targetPointObjects.has(object)) {
-          return;
-        }
-
-        object.layers.disable(BLOOM_LAYER);
-      });
-    }
-
-    this.engine.setOptions({
+    const bloomOptions = {
       bloomEnabled: true,
-      bloomStrength: QR_BLOOM_STRENGTH,
-      bloomRadius: QR_BLOOM_RADIUS,
-      bloomThreshold: QR_BLOOM_THRESHOLD
+      bloomStrength: restoreOptions.bloomStrength,
+      bloomRadius: restoreOptions.bloomRadius,
+      bloomThreshold: restoreOptions.bloomThreshold
+    };
+
+    console.info('[Piantala bloom] Bloom selettivo applicato', {
+      modelIds: [...targetIds],
+      bloomOptions
     });
+
+    this.engine.setOptions(bloomOptions);
 
     this.selectiveBloomTimeoutId = window.setTimeout(() => {
       this.restoreAllModelBloomLayers();
@@ -906,13 +938,15 @@ export class PointcloudEngineAdapter {
 
     for (let attempt = 0; attempt < SPAWN_CANDIDATE_LIMIT; attempt += 1) {
       const depthIndex = (this.spawnIndex + attempt) % SPAWN_DEPTH_LAYERS.length;
-      const angle = Math.random() * Math.PI * 2;
-      const radius = Math.sqrt(
-        randomBetween(SPAWN_MIN_RADIUS ** 2, SPAWN_MAX_RADIUS ** 2)
-      );
+      const band = SPAWN_Y_BANDS[(this.spawnIndex + attempt) % SPAWN_Y_BANDS.length];
+      const shouldFavorEdge = Math.random() < SPAWN_EDGE_PROBABILITY;
+      const edgeDirection = Math.random() < 0.5 ? -1 : 1;
+      const x = shouldFavorEdge
+        ? edgeDirection * randomBetween(SPAWN_X_LIMIT * 0.58, SPAWN_X_LIMIT)
+        : randomBetween(-SPAWN_X_LIMIT, SPAWN_X_LIMIT);
       const candidate = {
-        x: Math.cos(angle) * radius * SPAWN_X_RADIUS_FACTOR,
-        y: Math.sin(angle) * radius * SPAWN_Y_RADIUS_FACTOR,
+        x,
+        y: randomBetween(band.min, band.max),
         z: SPAWN_DEPTH_LAYERS[depthIndex]
       };
 
@@ -935,16 +969,16 @@ export class PointcloudEngineAdapter {
   private buildScaleMultiplierForDepth(depthZ: number): number {
     let multiplier = 0.62;
 
-    if (depthZ >= 1.4) {
-      multiplier = 1.36;
-    } else if (depthZ >= 0.85) {
-      multiplier = 1.18;
-    } else if (depthZ >= 0.2) {
+    if (depthZ >= 0.35) {
+      multiplier = 1.06;
+    } else if (depthZ >= 0.1) {
+      multiplier = 1.03;
+    } else if (depthZ >= -0.1) {
       multiplier = 1;
-    } else if (depthZ >= -0.45) {
-      multiplier = 0.82;
-    } else if (depthZ >= -1) {
-      multiplier = 0.68;
+    } else if (depthZ >= -0.35) {
+      multiplier = 0.97;
+    } else {
+      multiplier = 0.94;
     }
 
     return multiplier;
@@ -968,7 +1002,10 @@ export class PointcloudEngineAdapter {
   private getSpawnClearance(candidate: { x: number; y: number; z: number }): number {
     const candidateFootprint = this.buildFootprintForPosition(candidate);
 
-    if (Math.hypot(candidate.x, candidate.y) < SPAWN_CENTER_CLEAR_RADIUS) {
+    const centerClearRadius =
+      SPAWN_CENTER_CLEAR_RADIUS + candidateFootprint.radius * SPAWN_CENTER_FOOTPRINT_FACTOR;
+
+    if (Math.hypot(candidate.x, candidate.y) < centerClearRadius) {
       return -Infinity;
     }
 
@@ -1024,7 +1061,7 @@ export class PointcloudEngineAdapter {
           loadingAnimationDuration: animationDuration,
           scale,
           position,
-          rotation: UPRIGHT_ROTATION
+          rotation: getModelRotation(extension)
         };
 
         if (extension === 'ply') {
@@ -1084,7 +1121,7 @@ export class PointcloudEngineAdapter {
         loadingAnimationDuration: animationDuration,
         scale,
         position,
-        rotation: UPRIGHT_ROTATION
+        rotation: getModelRotation(extension)
       };
 
       if (extension === 'ply') {

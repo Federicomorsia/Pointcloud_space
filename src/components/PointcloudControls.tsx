@@ -197,8 +197,8 @@ export function PointcloudControls({
               <input
                 type="range"
                 min={0.5}
-                max={2.2}
-                step={0.02}
+                max={5}
+                step={0.05}
                 value={controls.exposure}
                 onChange={(event) =>
                   onUpdateControls({ exposure: Number.parseFloat(event.currentTarget.value) })
