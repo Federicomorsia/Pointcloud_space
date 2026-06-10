@@ -186,7 +186,7 @@ export function QrScannerPage() {
 
       const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
       setIsScanning(true);
-      setStatus('Scanner attivo.');
+      setStatus('Inquadra il QR personale.');
 
       const scanFrame = async () => {
         const video = videoRef.current;
@@ -229,21 +229,25 @@ export function QrScannerPage() {
     <main className="qr-page">
       <section className="qr-shell" aria-label="Lettore QR Giardino collettivo">
         <header className="qr-header">
-          <a href="/" className="qr-back">Giardino</a>
+          <a href="/" className="qr-back" aria-label="Torna al giardino">←</a>
           <div>
-            <h1>QR Bloom</h1>
-            <p>Leggi il biglietto e attiva il bloom sulle piante dell'utente.</p>
+            <h1>Scansiona QR</h1>
+            <p>Avvicina il cellulare e illumina le piante personali.</p>
           </div>
         </header>
 
         <div className="qr-camera">
           <video ref={videoRef} playsInline muted />
-          {!isScanning && <div className="qr-camera-placeholder">QR</div>}
+          {!isScanning && (
+            <div className="qr-camera-placeholder" aria-hidden="true">
+              <span />
+            </div>
+          )}
         </div>
 
         <div className="qr-actions">
           <button type="button" onClick={startCamera} disabled={isScanning || isSending}>
-            Avvia camera
+            {isScanning ? 'Camera attiva' : 'Avvia camera'}
           </button>
           <button type="button" onClick={stopCamera} disabled={!isScanning}>
             Stop
@@ -255,8 +259,8 @@ export function QrScannerPage() {
           <textarea
             value={manualValue}
             onChange={(event) => setManualValue(event.currentTarget.value)}
-            placeholder="user_id:..."
-            rows={4}
+            placeholder="Incolla o scrivi il codice"
+            rows={3}
           />
         </label>
 

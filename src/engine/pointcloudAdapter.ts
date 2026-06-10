@@ -9,15 +9,11 @@ import type {
 const FILE_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'ply']);
 const URL_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'gltf', 'ply']);
 const MODEL_SCALE = 3.8;
-const SPAWN_X_LIMIT = 20.5;
-const SPAWN_Y_BANDS = [
-  { min: -14.2, max: -4.6 },
-  { min: 4.6, max: 14.2 }
-] as const;
-const SPAWN_EDGE_PROBABILITY = 0.28;
-const SPAWN_CENTER_CLEAR_RADIUS = 3.7;
+const SPAWN_ELLIPSE_RADIUS_X = 28;
+const SPAWN_ELLIPSE_RADIUS_Y = 20;
+const SPAWN_CENTER_CLEAR_RADIUS = 4.35;
 const SPAWN_CENTER_FOOTPRINT_FACTOR = 0.36;
-const SPAWN_COLLISION_PADDING = 1.75;
+const SPAWN_COLLISION_PADDING = 1.45;
 const SPAWN_CANDIDATE_LIMIT = 5200;
 const SPAWN_DEPTH_LAYERS = [0.45, 0.2, 0, -0.2, -0.45] as const;
 const DEPTH_FOG_COLOR = '#000000';
@@ -139,6 +135,22 @@ function normalizeEngineError(error: unknown, fallback: string): Error {
 
 function randomBetween(min: number, max: number): number {
   return min + Math.random() * (max - min);
+}
+
+function buildEllipseSpawnPoint(index: number, attempt: number): { x: number; y: number } {
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const outerBiasedAttempt = (index + attempt) % 4 !== 0;
+  const radius = outerBiasedAttempt
+    ? Math.sqrt(randomBetween(0.22, 1.18))
+    : Math.sqrt(Math.random() * 1.18);
+  const angle =
+    (index + attempt) * goldenAngle +
+    randomBetween(-0.22, 0.22);
+
+  return {
+    x: Math.cos(angle) * radius * SPAWN_ELLIPSE_RADIUS_X,
+    y: Math.sin(angle) * radius * SPAWN_ELLIPSE_RADIUS_Y
+  };
 }
 
 function clamp01(value: number): number {
@@ -525,12 +537,13 @@ export class PointcloudEngineAdapter {
     const spriteMaterial = new THREE.SpriteMaterial({
       map: texture,
       transparent: true,
-      depthTest: true,
+      depthTest: false,
       depthWrite: false
     });
 
     const sprite = new THREE.Sprite(spriteMaterial);
     makeObjectDarkenableInBloomPass(sprite);
+    sprite.renderOrder = 10000;
     sprite.position.set(0, 0, 0.1);
 
     scene.add(sprite);
@@ -571,12 +584,13 @@ export class PointcloudEngineAdapter {
     const spriteMaterial = new THREE.SpriteMaterial({
       map: texture,
       transparent: true,
-      depthTest: true,
+      depthTest: false,
       depthWrite: false
     });
 
     const sprite = new THREE.Sprite(spriteMaterial);
     makeObjectDarkenableInBloomPass(sprite);
+    sprite.renderOrder = 10000;
     sprite.position.set(0, 0, 0.1);
 
     scene.add(sprite);
@@ -938,15 +952,10 @@ export class PointcloudEngineAdapter {
 
     for (let attempt = 0; attempt < SPAWN_CANDIDATE_LIMIT; attempt += 1) {
       const depthIndex = (this.spawnIndex + attempt) % SPAWN_DEPTH_LAYERS.length;
-      const band = SPAWN_Y_BANDS[(this.spawnIndex + attempt) % SPAWN_Y_BANDS.length];
-      const shouldFavorEdge = Math.random() < SPAWN_EDGE_PROBABILITY;
-      const edgeDirection = Math.random() < 0.5 ? -1 : 1;
-      const x = shouldFavorEdge
-        ? edgeDirection * randomBetween(SPAWN_X_LIMIT * 0.58, SPAWN_X_LIMIT)
-        : randomBetween(-SPAWN_X_LIMIT, SPAWN_X_LIMIT);
+      const point = buildEllipseSpawnPoint(this.spawnIndex, attempt);
       const candidate = {
-        x,
-        y: randomBetween(band.min, band.max),
+        x: point.x,
+        y: point.y,
         z: SPAWN_DEPTH_LAYERS[depthIndex]
       };
 
