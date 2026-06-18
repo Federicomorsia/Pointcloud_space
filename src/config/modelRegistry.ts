@@ -14,6 +14,9 @@ const normalizeModelKey = (value: string) =>
     .replace(/[^a-z0-9]+/g, '')
     .trim() ?? '';
 
+const getTrailingModelNumber = (value: string) =>
+  value.match(/(\d+)$/)?.[1]?.replace(/^0+/, '') || null;
+
 const modelEntries = Object.entries(modelModules).map(([path, url]) => {
   const filename = path.replace('/public/models/', '');
   const normalized = normalizeModelKey(filename);
@@ -42,9 +45,12 @@ export function resolveLocalModelUrl(modelKey?: string | null, modelUrl?: string
     return exact.url;
   }
 
-  const numericAlias = key.match(/(\d+)$/)?.[1]?.replace(/^0+/, '') || null;
+  const numericAlias = getTrailingModelNumber(key);
   if (numericAlias) {
-    const numericExact = modelEntries.find((entry) => entry.normalized === numericAlias);
+    const numericExact = modelEntries.find((entry) => {
+      return getTrailingModelNumber(entry.normalized) === numericAlias;
+    });
+
     if (numericExact) {
       return numericExact.url;
     }
