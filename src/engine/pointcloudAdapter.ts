@@ -11,6 +11,7 @@ const URL_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'gltf', 'ply']);
 const MODEL_SCALE = 3.8;
 const SPAWN_ELLIPSE_RADIUS_X = 28;
 const SPAWN_ELLIPSE_RADIUS_Y = 20;
+const SPAWN_CAMERA_MARGIN = MODEL_SCALE * 1.85;
 const SPAWN_CENTER_CLEAR_RADIUS = 4.35;
 const SPAWN_CENTER_FOOTPRINT_FACTOR = 0.36;
 const SPAWN_COLLISION_PADDING = 1.45;
@@ -141,8 +142,8 @@ function buildEllipseSpawnPoint(index: number, attempt: number): { x: number; y:
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   const outerBiasedAttempt = (index + attempt) % 4 !== 0;
   const radius = outerBiasedAttempt
-    ? Math.sqrt(randomBetween(0.22, 1.18))
-    : Math.sqrt(Math.random() * 1.18);
+    ? Math.sqrt(randomBetween(0.22, 0.96))
+    : Math.sqrt(Math.random() * 0.96);
   const angle =
     (index + attempt) * goldenAngle +
     randomBetween(-0.22, 0.22);
@@ -292,6 +293,8 @@ export class PointcloudEngineAdapter {
 
   private spawnIndex = 0;
 
+  private modelIdCounter = 0;
+
   private readonly modelSpawnPositions = new Map<string, PlantFootprint>();
 
   private readonly modelPointObjects = new Map<string, any>();
@@ -407,7 +410,7 @@ export class PointcloudEngineAdapter {
     }
   }
 
-  private restoreAllModelBloomLayers(): void {
+  private restoreAllModelBloomState(): void {
     if (this.selectiveBloomLayerSnapshot.length) {
       for (const { object, hadBloomLayer } of this.selectiveBloomLayerSnapshot) {
         if (!object?.layers) {
@@ -421,12 +424,6 @@ export class PointcloudEngineAdapter {
         }
       }
       this.selectiveBloomLayerSnapshot = [];
-    }
-
-    for (const point of this.modelPointObjects.values()) {
-      if (typeof point?.layers?.enable === 'function') {
-        point.layers.enable(BLOOM_LAYER);
-      }
     }
   }
 
@@ -445,7 +442,7 @@ export class PointcloudEngineAdapter {
     if (this.selectiveBloomTimeoutId !== null) {
       window.clearTimeout(this.selectiveBloomTimeoutId);
       this.selectiveBloomTimeoutId = null;
-      this.restoreAllModelBloomLayers();
+      this.restoreAllModelBloomState();
     }
 
     this.selectiveBloomLayerSnapshot = [];
@@ -463,15 +460,35 @@ export class PointcloudEngineAdapter {
       });
     }
 
+    const objectModelIds = new Map<any, string>();
     for (const [modelId, point] of this.modelPointObjects.entries()) {
-      if (!point?.layers) {
-        continue;
+      objectModelIds.set(point, modelId);
+    }
+
+    const isolatePointObject = (point: any, modelId?: string) => {
+      if (!point?.layers || !point?.isPoints) {
+        return;
       }
 
-      if (targetIds.has(modelId)) {
+      const isTarget = Boolean(modelId && targetIds.has(modelId));
+      if (isTarget) {
         point.layers.enable(BLOOM_LAYER);
-      } else {
-        point.layers.disable(BLOOM_LAYER);
+        return;
+      }
+
+      point.layers.disable(BLOOM_LAYER);
+    };
+
+    if (scene && typeof scene.traverse === 'function') {
+      scene.traverse((object: any) => {
+        isolatePointObject(
+          object,
+          object?.userData?.pointcloudModelId ?? objectModelIds.get(object)
+        );
+      });
+    } else {
+      for (const [modelId, point] of this.modelPointObjects.entries()) {
+        isolatePointObject(point, modelId);
       }
     }
 
@@ -490,7 +507,7 @@ export class PointcloudEngineAdapter {
     this.engine.setOptions(bloomOptions);
 
     this.selectiveBloomTimeoutId = window.setTimeout(() => {
-      this.restoreAllModelBloomLayers();
+      this.restoreAllModelBloomState();
       this.engine.setOptions(restoreOptions);
       this.selectiveBloomTimeoutId = null;
     }, Math.max(800, durationMs));
@@ -904,7 +921,7 @@ export class PointcloudEngineAdapter {
       camera.position.set(
         this.viewDebug.cameraX,
         this.viewDebug.cameraY,
-        this.viewDebug.cameraZ
+        this.getCameraZForCurrentScene()
       );
     }
 
@@ -944,6 +961,34 @@ export class PointcloudEngineAdapter {
     this.viewDebug = { ...this.viewDebug, ...options };
     this.applyFrontCameraPose();
     this.updateTitleScale();
+  }
+
+  private getCameraZForCurrentScene(): number {
+    const camera = (this.engine as any).camera;
+    const fallbackZ = this.viewDebug.cameraZ;
+
+    if (!camera || typeof camera.fov !== 'number' || !this.modelSpawnPositions.size) {
+      return fallbackZ;
+    }
+
+    let maxX = 0;
+    let maxY = 0;
+    for (const footprint of this.modelSpawnPositions.values()) {
+      maxX = Math.max(maxX, Math.abs(footprint.x) + footprint.radius);
+      maxY = Math.max(maxY, Math.abs(footprint.y) + footprint.radius);
+    }
+
+    const verticalFov = (camera.fov * Math.PI) / 180;
+    const tanHalfFov = Math.tan(verticalFov / 2);
+    const aspect = camera.aspect || 1;
+    const requiredHalfWidth = maxX + SPAWN_CAMERA_MARGIN;
+    const requiredHalfHeight = maxY + SPAWN_CAMERA_MARGIN;
+    const requiredDistance = Math.max(
+      requiredHalfHeight / tanHalfFov,
+      requiredHalfWidth / (tanHalfFov * aspect)
+    );
+
+    return Math.max(fallbackZ, requiredDistance + this.viewDebug.targetZ);
   }
 
   private nextSpawnPosition(): { x: number; y: number; z: number } {
@@ -1039,6 +1084,17 @@ export class PointcloudEngineAdapter {
     return this.getSpawnClearance(candidate) >= 0;
   }
 
+  private buildUniqueModelId(source: string): string {
+    const baseId = buildModelId(source);
+    let id = `${baseId}-${++this.modelIdCounter}`;
+
+    while (this.modelPointObjects.has(id) || this.modelSpawnPositions.has(id)) {
+      id = `${baseId}-${++this.modelIdCounter}`;
+    }
+
+    return id;
+  }
+
   async addModelsFromFiles(files: FileList | File[], animationDuration = 1200): Promise<string[]> {
     this.assertNotDisposed();
 
@@ -1057,7 +1113,7 @@ export class PointcloudEngineAdapter {
         );
       }
 
-      const id = buildModelId(file.name);
+      const id = this.buildUniqueModelId(file.name);
       const position = this.nextSpawnPosition();
       const scale = this.buildScaleForDepth(position.z);
       this.modelSpawnPositions.set(id, this.buildFootprintForPosition(position));
@@ -1083,6 +1139,8 @@ export class PointcloudEngineAdapter {
           await this.engine.addModelFromFile(file, addOptions);
         }
         this.captureModelPointObject(id, previousPoints);
+        this.applyFrontCameraPose();
+        this.updateTitleScale();
         this.ensureWindLoop();
         this.ensureDepthPointShading();
         this.updateDepthPointShading();
@@ -1116,7 +1174,7 @@ export class PointcloudEngineAdapter {
       throw new Error('Formato URL non valido. Usa .obj, .glb, .gltf o .ply.');
     }
 
-    const id = buildModelId(trimmedUrl);
+    const id = this.buildUniqueModelId(trimmedUrl);
     const position = this.nextSpawnPosition();
     const scale = this.buildScaleForDepth(position.z);
     this.modelSpawnPositions.set(id, this.buildFootprintForPosition(position));
@@ -1172,9 +1230,12 @@ export class PointcloudEngineAdapter {
     this.engine.removeModel(id);
     this.modelSpawnPositions.delete(id);
     this.modelPointObjects.delete(id);
+    this.applyFrontCameraPose();
+    this.updateTitleScale();
 
     if (!this.engine.getModelIds().length) {
       this.spawnIndex = 0;
+      this.modelIdCounter = 0;
       this.modelSpawnPositions.clear();
       this.modelPointObjects.clear();
       this.stopWindLoop();
@@ -1186,6 +1247,7 @@ export class PointcloudEngineAdapter {
     this.assertNotDisposed();
     this.engine.clearModels();
     this.spawnIndex = 0;
+    this.modelIdCounter = 0;
     this.modelSpawnPositions.clear();
     this.modelPointObjects.clear();
     this.stopWindLoop();

@@ -149,6 +149,7 @@ export function QrScannerPage() {
 
     setIsSending(true);
     const { error } = await supabaseClient.from('qr_scan_events').insert({
+      owner_id: payload.userId,
       scanned_by: payload.userId,
       qr_code: payload.qrCode ?? payload.ticketToken ?? payload.raw,
       model_key: '__bloom__',

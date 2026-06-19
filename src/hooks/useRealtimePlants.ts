@@ -8,14 +8,23 @@ type QrScanEvent = {
   qr_code?: string;
   model_key?: string | null;
   model_url?: string | null;
+  owner_id?: string | null;
   scanned_by?: string | null;
   source?: string;
   created_at?: string;
 };
 
-function normalizeUserId(userId?: string | null): string | null {
-  const normalized = userId?.trim().toLowerCase();
+function normalizeProfileId(profileId?: string | null): string | null {
+  const normalized = profileId?.trim().toLowerCase();
   return normalized || null;
+}
+
+function getPlantProfileId(event: QrScanEvent): string | null {
+  return normalizeProfileId(event.owner_id ?? event.scanned_by);
+}
+
+function getBloomProfileId(event: QrScanEvent): string | null {
+  return normalizeProfileId(event.scanned_by ?? event.owner_id ?? event.qr_code);
 }
 
 export type RealtimePlant = {
@@ -62,7 +71,7 @@ export function useRealtimePlants({
       const eventId = event.id ?? `${event.qr_code ?? 'qr'}-${event.created_at ?? Date.now()}`;
 
       if (event.source === 'garden-bloom-scanner') {
-        const userId = normalizeUserId(event.scanned_by);
+        const userId = getBloomProfileId(event);
         if (!userId) {
           onNotice({
             type: 'error',
@@ -91,7 +100,9 @@ export function useRealtimePlants({
         qrCode: event.qr_code,
         modelKey: event.model_key,
         modelUrl,
-        userId: event.scanned_by,
+        userId: getPlantProfileId(event),
+        ownerId: event.owner_id,
+        scannedBy: event.scanned_by,
         localModels: LOCAL_MODEL_FILES
       });
 
@@ -111,7 +122,7 @@ export function useRealtimePlants({
           return;
         }
 
-        const userId = normalizeUserId(event.scanned_by);
+        const userId = getPlantProfileId(event);
         if (userId) {
           const userPlants = plantsByUserIdRef.current.get(userId) ?? [];
           plantsByUserIdRef.current.set(userId, [...userPlants, modelId]);
@@ -121,7 +132,9 @@ export function useRealtimePlants({
           eventId,
           modelId,
           modelUrl,
-          userId: event.scanned_by
+          userId,
+          ownerId: event.owner_id,
+          scannedBy: event.scanned_by
         });
       } catch (error) {
         console.error('[Piantala realtime] Caricamento modello fallito', {
@@ -140,7 +153,7 @@ export function useRealtimePlants({
           modelKey: event.model_key ?? '',
           modelUrl,
           modelId,
-          userId: event.scanned_by ?? null,
+          userId: getPlantProfileId(event),
           qrCode: event.qr_code ?? null,
           createdAt: event.created_at ?? null
         }
@@ -149,7 +162,7 @@ export function useRealtimePlants({
 
     client
       .from('qr_scan_events')
-      .select('id,qr_code,model_key,model_url,scanned_by,source,created_at')
+      .select('id,qr_code,model_key,model_url,owner_id,scanned_by,source,created_at')
       .or('source.is.null,source.neq.garden-bloom-scanner')
       .order('created_at', { ascending: false })
       .limit(80)
