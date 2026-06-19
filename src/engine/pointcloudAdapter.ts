@@ -30,6 +30,8 @@ const WIND_BASE_AMPLITUDE = 1.6;
 const WIND_GUST_MIN = 0.4;
 const WIND_GUST_MAX = 1.4;
 const BLOOM_LAYER = 1;
+const SELECTIVE_BLOOM_TARGET_STRENGTH = 0.15;
+const SELECTIVE_BLOOM_FADE_IN_MS = 1200;
 
 interface WindGustState {
   nextAtMs: number;
@@ -339,6 +341,8 @@ export class PointcloudEngineAdapter {
 
   private selectiveBloomTimeoutId: number | null = null;
 
+  private selectiveBloomFadeRafId: number | null = null;
+
   private selectiveBloomActiveKey: string | null = null;
 
   private selectiveBloomLayerSnapshot: Array<{ object: any; hadBloomLayer: boolean }> = [];
@@ -443,6 +447,49 @@ export class PointcloudEngineAdapter {
     }
   }
 
+  private cancelSelectiveBloomFade(): void {
+    if (this.selectiveBloomFadeRafId !== null) {
+      window.cancelAnimationFrame(this.selectiveBloomFadeRafId);
+      this.selectiveBloomFadeRafId = null;
+    }
+  }
+
+  private restoreSelectiveBloomState(restoreOptions: Partial<EngineRuntimeOptions>): void {
+    this.cancelSelectiveBloomFade();
+    this.restoreAllModelBloomLayers();
+    this.engine.setOptions({
+      ...restoreOptions,
+      selectiveBloomHideNonBloomed: false
+    });
+  }
+
+  private startSelectiveBloomFade(targetStrength: number): void {
+    this.cancelSelectiveBloomFade();
+
+    const startedAt = performance.now();
+    const animate = (nowMs: number) => {
+      if (this.disposed) {
+        this.selectiveBloomFadeRafId = null;
+        return;
+      }
+
+      const progress = Math.min(1, (nowMs - startedAt) / SELECTIVE_BLOOM_FADE_IN_MS);
+      const easedProgress = 1 - Math.pow(1 - progress, 3);
+      this.engine.setOptions({
+        bloomStrength: targetStrength * easedProgress
+      });
+
+      if (progress < 1) {
+        this.selectiveBloomFadeRafId = window.requestAnimationFrame(animate);
+        return;
+      }
+
+      this.selectiveBloomFadeRafId = null;
+    };
+
+    this.selectiveBloomFadeRafId = window.requestAnimationFrame(animate);
+  }
+
   triggerSelectiveBloom(
     modelIds: string[],
     durationMs: number,
@@ -459,22 +506,14 @@ export class PointcloudEngineAdapter {
 
       if (targetKey && targetKey === this.selectiveBloomActiveKey) {
         this.selectiveBloomTimeoutId = window.setTimeout(() => {
-          this.restoreAllModelBloomLayers();
-          this.engine.setOptions({
-            ...restoreOptions,
-            selectiveBloomHideNonBloomed: false
-          });
+          this.restoreSelectiveBloomState(restoreOptions);
           this.selectiveBloomTimeoutId = null;
         }, Math.max(800, durationMs));
         return true;
       }
 
       if (this.selectiveBloomActiveKey !== null) {
-        this.restoreAllModelBloomLayers();
-        this.engine.setOptions({
-          ...restoreOptions,
-          selectiveBloomHideNonBloomed: false
-        });
+        this.restoreSelectiveBloomState(restoreOptions);
       }
     }
 
@@ -529,7 +568,7 @@ export class PointcloudEngineAdapter {
 
     const bloomOptions = {
       bloomEnabled: true,
-      bloomStrength: restoreOptions.bloomStrength,
+      bloomStrength: 0,
       bloomRadius: restoreOptions.bloomRadius,
       bloomThreshold: restoreOptions.bloomThreshold,
       selectiveBloomHideNonBloomed: true
@@ -541,14 +580,11 @@ export class PointcloudEngineAdapter {
     });
 
     this.engine.setOptions(bloomOptions);
+    this.startSelectiveBloomFade(SELECTIVE_BLOOM_TARGET_STRENGTH);
     this.selectiveBloomActiveKey = targetKey;
 
     this.selectiveBloomTimeoutId = window.setTimeout(() => {
-      this.restoreAllModelBloomLayers();
-      this.engine.setOptions({
-        ...restoreOptions,
-        selectiveBloomHideNonBloomed: false
-      });
+      this.restoreSelectiveBloomState(restoreOptions);
       this.selectiveBloomTimeoutId = null;
     }, Math.max(800, durationMs));
 
@@ -1428,6 +1464,7 @@ export class PointcloudEngineAdapter {
       window.clearTimeout(this.selectiveBloomTimeoutId);
       this.selectiveBloomTimeoutId = null;
     }
+    this.cancelSelectiveBloomFade();
     this.engine.dispose();
     this.disposed = true;
   }

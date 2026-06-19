@@ -29,20 +29,20 @@ body {
 }
 
 .pc-layout {
-  display: grid;
-  grid-template-columns: 360px 1fr;
-  gap: 0;
+  position: relative;
+  display: block;
   min-height: 100svh;
   height: 100svh;
   width: 100%;
   overflow: hidden;
 }
 
-.pc-layout--controls-hidden {
-  grid-template-columns: 0 1fr;
-}
-
 .pc-controls {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 30;
+  width: min(360px, 100vw);
+  height: 100svh;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -50,12 +50,18 @@ body {
   border-right: 2px solid var(--border);
   overflow: hidden;
   min-height: 0;
+  box-shadow: 18px 0 38px rgba(0, 0, 0, 0.32);
+  transform: translateX(0);
+  transition:
+    transform 180ms ease,
+    opacity 180ms ease;
 }
 
 .pc-controls-hidden {
   opacity: 0;
   pointer-events: none;
   border-right: 0;
+  transform: translateX(-100%);
 }
 
 .pc-controls-header {
@@ -300,7 +306,9 @@ input[type='color'] {
   position: relative;
   overflow: hidden;
   background: var(--bg);
-  min-height: 0;
+  width: 100%;
+  height: 100svh;
+  min-height: 100svh;
 }
 
 .pc-stage {
@@ -542,28 +550,18 @@ input[type='color'] {
 
 @media (max-width: 768px) {
   .pc-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
-  }
-
-  .pc-layout--controls-hidden {
-    grid-template-rows: 0 1fr;
+    height: 100svh;
   }
 
   .pc-controls {
-    border-right: none;
-    border-bottom: 2px solid var(--border);
-    max-height: 50%;
-    order: 2;
-    min-height: 0;
+    width: min(360px, 100vw);
+    border-right: 2px solid var(--border);
+    border-bottom: 0;
+    max-height: none;
   }
 
   .pc-layout--controls-hidden .pc-controls {
-    border-bottom: 0;
-  }
-
-  .pc-stage-panel {
-    order: 1;
+    border-right: 0;
   }
 
   .pc-row {
