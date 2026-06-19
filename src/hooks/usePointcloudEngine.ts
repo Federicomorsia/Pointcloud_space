@@ -37,7 +37,7 @@ const DEFAULT_CONTROLS: EngineControlsState = {
   saturation: 1.14,
   autoRotate: false,
   bloomEnabled: false,
-  bloomStrength: 0.45,
+  bloomStrength: 0.1,
   bloomRadius: 0,
   bloomThreshold: 0.15,
   ...DEFAULT_VIEW_DEBUG

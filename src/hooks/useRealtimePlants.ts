@@ -3,6 +3,8 @@ import { LOCAL_MODEL_FILES, resolveLocalModelUrl } from '../config/modelRegistry
 import { hasSupabaseConfig, supabaseClient } from '../lib/supabaseClient';
 import type { EngineNotice } from './usePointcloudEngine';
 
+const BLOOM_DURATION_MS = 6500;
+
 type QrScanEvent = {
   id?: string;
   qr_code?: string;
@@ -13,9 +15,17 @@ type QrScanEvent = {
   created_at?: string;
 };
 
-function normalizeUserId(userId?: string | null): string | null {
-  const normalized = userId?.trim().toLowerCase();
+function normalizeProfileId(profileId?: string | null): string | null {
+  const normalized = profileId?.trim().toLowerCase();
   return normalized || null;
+}
+
+function getPlantProfileId(event: QrScanEvent): string | null {
+  return normalizeProfileId(event.scanned_by);
+}
+
+function getBloomProfileId(event: QrScanEvent): string | null {
+  return normalizeProfileId(event.scanned_by ?? event.qr_code);
 }
 
 export type RealtimePlant = {
@@ -43,6 +53,7 @@ export function useRealtimePlants({
 }: UseRealtimePlantsArgs) {
   const loadedEventIdsRef = useRef(new Set<string>());
   const plantsByUserIdRef = useRef(new Map<string, string[]>());
+  const plantLoadQueueRef = useRef(Promise.resolve());
   const [plants, setPlants] = useState<RealtimePlant[]>([]);
 
   useEffect(() => {
@@ -58,29 +69,7 @@ export function useRealtimePlants({
 
     const client = supabaseClient;
 
-    const handleScanEvent = async (event: QrScanEvent) => {
-      const eventId = event.id ?? `${event.qr_code ?? 'qr'}-${event.created_at ?? Date.now()}`;
-
-      if (event.source === 'garden-bloom-scanner') {
-        const userId = normalizeUserId(event.scanned_by);
-        if (!userId) {
-          onNotice({
-            type: 'error',
-            text: 'QR letto, ma manca scanned_by per associare il bloom.'
-          });
-          return;
-        }
-
-        const modelIds = plantsByUserIdRef.current.get(userId) ?? [];
-        console.info('[Piantala realtime] Bloom richiesto', {
-          userId,
-          modelIds,
-          knownUsers: Array.from(plantsByUserIdRef.current.keys())
-        });
-        onTriggerBloom(modelIds, 4200);
-        return;
-      }
-
+    const handlePlantEvent = async (event: QrScanEvent, eventId: string) => {
       if (loadedEventIdsRef.current.has(eventId)) {
         return;
       }
@@ -91,7 +80,8 @@ export function useRealtimePlants({
         qrCode: event.qr_code,
         modelKey: event.model_key,
         modelUrl,
-        userId: event.scanned_by,
+        userId: getPlantProfileId(event),
+        scannedBy: event.scanned_by,
         localModels: LOCAL_MODEL_FILES
       });
 
@@ -111,7 +101,7 @@ export function useRealtimePlants({
           return;
         }
 
-        const userId = normalizeUserId(event.scanned_by);
+        const userId = getPlantProfileId(event);
         if (userId) {
           const userPlants = plantsByUserIdRef.current.get(userId) ?? [];
           plantsByUserIdRef.current.set(userId, [...userPlants, modelId]);
@@ -121,7 +111,9 @@ export function useRealtimePlants({
           eventId,
           modelId,
           modelUrl,
-          userId: event.scanned_by
+          userId,
+          scannedBy: event.scanned_by,
+          linkedPlantsByUser: Object.fromEntries(plantsByUserIdRef.current.entries())
         });
       } catch (error) {
         console.error('[Piantala realtime] Caricamento modello fallito', {
@@ -140,11 +132,44 @@ export function useRealtimePlants({
           modelKey: event.model_key ?? '',
           modelUrl,
           modelId,
-          userId: event.scanned_by ?? null,
+          userId: getPlantProfileId(event),
           qrCode: event.qr_code ?? null,
           createdAt: event.created_at ?? null
         }
       ]);
+    };
+
+    const enqueuePlantEvent = (event: QrScanEvent, eventId: string) => {
+      const next = plantLoadQueueRef.current.then(() => handlePlantEvent(event, eventId));
+      plantLoadQueueRef.current = next.catch(() => undefined);
+      return next;
+    };
+
+    const handleScanEvent = async (event: QrScanEvent) => {
+      const eventId = event.id ?? `${event.qr_code ?? 'qr'}-${event.created_at ?? Date.now()}`;
+
+      if (event.source === 'garden-bloom-scanner') {
+        const userId = getBloomProfileId(event);
+        if (!userId) {
+          onNotice({
+            type: 'error',
+            text: 'QR letto, ma manca scanned_by per associare il bloom.'
+          });
+          return;
+        }
+
+        await plantLoadQueueRef.current;
+        const modelIds = plantsByUserIdRef.current.get(userId) ?? [];
+        console.info('[Piantala realtime] Bloom richiesto', {
+          userId,
+          modelIds,
+          knownUsers: Array.from(plantsByUserIdRef.current.keys())
+        });
+        onTriggerBloom(modelIds, BLOOM_DURATION_MS);
+        return;
+      }
+
+      await enqueuePlantEvent(event, eventId);
     };
 
     client
@@ -153,15 +178,15 @@ export function useRealtimePlants({
       .or('source.is.null,source.neq.garden-bloom-scanner')
       .order('created_at', { ascending: false })
       .limit(80)
-      .then(({ data, error }) => {
+      .then(async ({ data, error }) => {
         if (error) {
           console.error('[Piantala realtime] Errore caricamento eventi iniziali', error);
           return;
         }
 
-        data?.reverse().forEach((event) => {
-          void handleScanEvent(event as QrScanEvent);
-        });
+        for (const event of data?.reverse() ?? []) {
+          await handleScanEvent(event as QrScanEvent);
+        }
       });
 
     const channel = client

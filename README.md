@@ -21,8 +21,9 @@ Integrazione production-ready di `createPointcloudEngine` in una pagina standalo
 
 - `src/engine/loadEngineFactory.ts`
   - Carica dinamicamente il modulo che esporta `createPointcloudEngine`.
+  - Usa prima l'engine locale in `src/vendor/pointcloud-engine.js`, che include la modalita bloom selettiva per QR.
   - Modulo configurabile via `VITE_POINTCLOUD_ENGINE_MODULE`.
-  - Supporto automatico per varianti: `pointcloud-tool`, `pointcloud-tool/engine`, `pointcloud_tool`.
+  - Supporto automatico di fallback per varianti: `pointcloud-tool`, `pointcloud-tool/engine`, `pointcloud_tool`.
 
 - `src/hooks/usePointcloudEngine.ts`
   - Wiring lifecycle React.
@@ -49,15 +50,15 @@ Integrazione production-ready di `createPointcloudEngine` in una pagina standalo
 ## Requisiti
 
 - Node.js 18+
-- Modulo engine che esporta `createPointcloudEngine`
+- Modulo engine locale in `src/vendor/pointcloud-engine.js`, con fallback opzionale a un pacchetto che esporta `createPointcloudEngine`
 
-Per default viene usato `pointcloud-tool`. Se il tuo engine e privato o locale, imposta nel file `.env`:
+Per default viene usato l'engine locale patchato. Se vuoi forzare un engine esterno, imposta nel file `.env`:
 
 ```bash
 VITE_POINTCLOUD_ENGINE_MODULE=@my-scope/pointcloud-tool
 ```
 
-Oppure un path locale risolvibile da Vite, ad esempio:
+Oppure un altro path locale risolvibile da Vite, ad esempio:
 
 ```bash
 VITE_POINTCLOUD_ENGINE_MODULE=./src/vendor/pointcloud-engine

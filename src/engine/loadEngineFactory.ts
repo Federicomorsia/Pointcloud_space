@@ -1,6 +1,7 @@
 import type { CreatePointcloudEngine } from './pointcloudEngineTypes';
 
 const DEFAULT_ENGINE_MODULES = [
+  'local-pointcloud-engine',
   'pointcloud-tool',
   'pointcloud-tool/engine',
   'pointcloud_tool',
@@ -12,6 +13,7 @@ type EngineModuleLike = {
 };
 
 const KNOWN_IMPORTERS: Record<string, () => Promise<EngineModuleLike>> = {
+  'local-pointcloud-engine': () => import('../vendor/pointcloud-engine.js'),
   'pointcloud-tool': () => import('pointcloud-tool'),
   'pointcloud-tool/engine': () => import('pointcloud-tool/engine'),
   pointcloud_tool: () => import('pointcloud-tool'),

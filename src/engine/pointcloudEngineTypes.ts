@@ -14,6 +14,7 @@ export interface PointcloudEngineOptions {
   bloomStrength?: number;
   bloomRadius?: number;
   bloomThreshold?: number;
+  selectiveBloomHideNonBloomed?: boolean;
   randomPlacementRange?: number;
   randomPlacementPadding?: number;
   randomPlacementAttempts?: number;

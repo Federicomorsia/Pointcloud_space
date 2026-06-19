@@ -9,13 +9,15 @@ import type {
 const FILE_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'ply']);
 const URL_MODEL_EXTENSIONS = new Set(['obj', 'glb', 'gltf', 'ply']);
 const MODEL_SCALE = 3.8;
-const SPAWN_ELLIPSE_RADIUS_X = 28;
-const SPAWN_ELLIPSE_RADIUS_Y = 20;
+const SPAWN_ELLIPSE_RADIUS_X = 20;
+const SPAWN_ELLIPSE_RADIUS_Y = 13;
 const SPAWN_CENTER_CLEAR_RADIUS = 4.35;
 const SPAWN_CENTER_FOOTPRINT_FACTOR = 0.36;
 const SPAWN_COLLISION_PADDING = 1.45;
 const SPAWN_CANDIDATE_LIMIT = 5200;
 const SPAWN_DEPTH_LAYERS = [0.45, 0.2, 0, -0.2, -0.45] as const;
+const SPAWN_CAMERA_MARGIN = MODEL_SCALE * 2.7;
+const CAMERA_FIT_SAFE_VIEWPORT_FRACTION = 0.82;
 const DEPTH_FOG_COLOR = '#000000';
 const MESH_MODEL_ROTATION = { x: -Math.PI / 2, y: -Math.PI / 6, z: 0 };
 const PLY_MODEL_ROTATION = { x: 0, y: -Math.PI / 6, z: 0 };
@@ -41,6 +43,13 @@ interface PlantFootprint {
   y: number;
   z: number;
   radius: number;
+}
+
+interface PlantBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
 }
 
 export interface ViewDebugOptions {
@@ -141,8 +150,8 @@ function buildEllipseSpawnPoint(index: number, attempt: number): { x: number; y:
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
   const outerBiasedAttempt = (index + attempt) % 4 !== 0;
   const radius = outerBiasedAttempt
-    ? Math.sqrt(randomBetween(0.22, 1.18))
-    : Math.sqrt(Math.random() * 1.18);
+    ? Math.sqrt(randomBetween(0.22, 0.96))
+    : Math.sqrt(Math.random() * 0.96);
   const angle =
     (index + attempt) * goldenAngle +
     randomBetween(-0.22, 0.22);
@@ -330,6 +339,8 @@ export class PointcloudEngineAdapter {
 
   private selectiveBloomTimeoutId: number | null = null;
 
+  private selectiveBloomActiveKey: string | null = null;
+
   private selectiveBloomLayerSnapshot: Array<{ object: any; hadBloomLayer: boolean }> = [];
 
   private constructor(engine: PointcloudEngine, stage: HTMLElement) {
@@ -353,7 +364,7 @@ export class PointcloudEngineAdapter {
       pointSize: 0.01,
       autoRotate: false,
       bloomEnabled: false,
-      bloomStrength: 0.45,
+      bloomStrength: 0.1,
       bloomRadius: 0,
       bloomThreshold: 0.15,
       randomPlacementRange: 5,
@@ -423,6 +434,8 @@ export class PointcloudEngineAdapter {
       this.selectiveBloomLayerSnapshot = [];
     }
 
+    this.selectiveBloomActiveKey = null;
+
     for (const point of this.modelPointObjects.values()) {
       if (typeof point?.layers?.enable === 'function') {
         point.layers.enable(BLOOM_LAYER);
@@ -438,14 +451,35 @@ export class PointcloudEngineAdapter {
     this.assertNotDisposed();
 
     const targetIds = new Set(modelIds.filter((id) => this.modelPointObjects.has(id)));
-    if (!targetIds.size) {
-      return false;
-    }
+    const targetKey = [...targetIds].sort().join('|');
 
     if (this.selectiveBloomTimeoutId !== null) {
       window.clearTimeout(this.selectiveBloomTimeoutId);
       this.selectiveBloomTimeoutId = null;
-      this.restoreAllModelBloomLayers();
+
+      if (targetKey && targetKey === this.selectiveBloomActiveKey) {
+        this.selectiveBloomTimeoutId = window.setTimeout(() => {
+          this.restoreAllModelBloomLayers();
+          this.engine.setOptions({
+            ...restoreOptions,
+            selectiveBloomHideNonBloomed: false
+          });
+          this.selectiveBloomTimeoutId = null;
+        }, Math.max(800, durationMs));
+        return true;
+      }
+
+      if (this.selectiveBloomActiveKey !== null) {
+        this.restoreAllModelBloomLayers();
+        this.engine.setOptions({
+          ...restoreOptions,
+          selectiveBloomHideNonBloomed: false
+        });
+      }
+    }
+
+    if (!targetIds.size) {
+      return false;
     }
 
     this.selectiveBloomLayerSnapshot = [];
@@ -463,15 +497,33 @@ export class PointcloudEngineAdapter {
       });
     }
 
+    const objectModelIds = new Map<any, string>();
     for (const [modelId, point] of this.modelPointObjects.entries()) {
-      if (!point?.layers) {
-        continue;
+      objectModelIds.set(point, modelId);
+    }
+
+    const applySelectiveLayer = (point: any, modelId?: string) => {
+      if (!point?.isPoints || !point?.layers) {
+        return;
       }
 
-      if (targetIds.has(modelId)) {
+      if (modelId && targetIds.has(modelId)) {
         point.layers.enable(BLOOM_LAYER);
       } else {
         point.layers.disable(BLOOM_LAYER);
+      }
+    };
+
+    if (scene && typeof scene.traverse === 'function') {
+      scene.traverse((object: any) => {
+        applySelectiveLayer(
+          object,
+          object?.userData?.pointcloudModelId ?? objectModelIds.get(object)
+        );
+      });
+    } else {
+      for (const [modelId, point] of this.modelPointObjects.entries()) {
+        applySelectiveLayer(point, modelId);
       }
     }
 
@@ -479,7 +531,8 @@ export class PointcloudEngineAdapter {
       bloomEnabled: true,
       bloomStrength: restoreOptions.bloomStrength,
       bloomRadius: restoreOptions.bloomRadius,
-      bloomThreshold: restoreOptions.bloomThreshold
+      bloomThreshold: restoreOptions.bloomThreshold,
+      selectiveBloomHideNonBloomed: true
     };
 
     console.info('[Piantala bloom] Bloom selettivo applicato', {
@@ -488,10 +541,14 @@ export class PointcloudEngineAdapter {
     });
 
     this.engine.setOptions(bloomOptions);
+    this.selectiveBloomActiveKey = targetKey;
 
     this.selectiveBloomTimeoutId = window.setTimeout(() => {
       this.restoreAllModelBloomLayers();
-      this.engine.setOptions(restoreOptions);
+      this.engine.setOptions({
+        ...restoreOptions,
+        selectiveBloomHideNonBloomed: false
+      });
       this.selectiveBloomTimeoutId = null;
     }, Math.max(800, durationMs));
 
@@ -904,8 +961,16 @@ export class PointcloudEngineAdapter {
       camera.position.set(
         this.viewDebug.cameraX,
         this.viewDebug.cameraY,
-        this.viewDebug.cameraZ
+        this.getCameraZForCurrentScene()
       );
+    }
+
+    if (typeof camera.far === 'number') {
+      const cameraDistance = Math.max(
+        4,
+        Math.abs((camera.position?.z ?? this.viewDebug.cameraZ) - this.viewDebug.targetZ)
+      );
+      camera.far = Math.max(200, cameraDistance * 4);
     }
 
     if (camera.up?.set) {
@@ -944,6 +1009,107 @@ export class PointcloudEngineAdapter {
     this.viewDebug = { ...this.viewDebug, ...options };
     this.applyFrontCameraPose();
     this.updateTitleScale();
+  }
+
+  private getCameraZForCurrentScene(): number {
+    const camera = (this.engine as any).camera;
+    const fallbackZ = this.viewDebug.cameraZ;
+
+    if (!camera || typeof camera.fov !== 'number') {
+      return fallbackZ;
+    }
+
+    const bounds = this.getPlantFramingBounds();
+    if (!bounds) {
+      return fallbackZ;
+    }
+
+    const targetX = this.viewDebug.targetX;
+    const targetY = this.viewDebug.targetY;
+    const verticalFov = (camera.fov * Math.PI) / 180;
+    const tanHalfFov = Math.tan(verticalFov / 2);
+    const aspect = camera.aspect || 1;
+    const requiredHalfWidth =
+      (Math.max(Math.abs(bounds.minX - targetX), Math.abs(bounds.maxX - targetX)) +
+        SPAWN_CAMERA_MARGIN) /
+      CAMERA_FIT_SAFE_VIEWPORT_FRACTION;
+    const requiredHalfHeight =
+      (Math.max(Math.abs(bounds.minY - targetY), Math.abs(bounds.maxY - targetY)) +
+        SPAWN_CAMERA_MARGIN) /
+      CAMERA_FIT_SAFE_VIEWPORT_FRACTION;
+    const requiredDistance = Math.max(
+      requiredHalfHeight / tanHalfFov,
+      requiredHalfWidth / (tanHalfFov * aspect)
+    );
+
+    return Math.max(fallbackZ, requiredDistance + this.viewDebug.targetZ);
+  }
+
+  private getPlantFramingBounds(): PlantBounds | null {
+    let bounds: PlantBounds | null = null;
+
+    const includePoint = (x: number, y: number) => {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        return;
+      }
+
+      if (!bounds) {
+        bounds = { minX: x, maxX: x, minY: y, maxY: y };
+        return;
+      }
+
+      bounds.minX = Math.min(bounds.minX, x);
+      bounds.maxX = Math.max(bounds.maxX, x);
+      bounds.minY = Math.min(bounds.minY, y);
+      bounds.maxY = Math.max(bounds.maxY, y);
+    };
+
+    for (const footprint of this.modelSpawnPositions.values()) {
+      includePoint(footprint.x - footprint.radius, footprint.y - footprint.radius);
+      includePoint(footprint.x + footprint.radius, footprint.y + footprint.radius);
+    }
+
+    for (const point of this.modelPointObjects.values()) {
+      if (!point?.geometry) {
+        continue;
+      }
+
+      point.updateMatrixWorld?.(true);
+
+      if (!point.geometry.boundingBox && typeof point.geometry.computeBoundingBox === 'function') {
+        point.geometry.computeBoundingBox();
+      }
+
+      const box = point.geometry.boundingBox;
+      if (!box?.min || !box?.max || !point.matrixWorld) {
+        continue;
+      }
+
+      const worldPoint = box.min.clone?.();
+      if (!worldPoint?.set || typeof worldPoint.applyMatrix4 !== 'function') {
+        continue;
+      }
+
+      const min = box.min;
+      const max = box.max;
+      const corners = [
+        [min.x, min.y, min.z],
+        [min.x, min.y, max.z],
+        [min.x, max.y, min.z],
+        [min.x, max.y, max.z],
+        [max.x, min.y, min.z],
+        [max.x, min.y, max.z],
+        [max.x, max.y, min.z],
+        [max.x, max.y, max.z]
+      ] as const;
+
+      for (const [x, y, z] of corners) {
+        worldPoint.set(x, y, z).applyMatrix4(point.matrixWorld);
+        includePoint(worldPoint.x, worldPoint.y);
+      }
+    }
+
+    return bounds;
   }
 
   private nextSpawnPosition(): { x: number; y: number; z: number } {
@@ -1100,6 +1266,9 @@ export class PointcloudEngineAdapter {
       throw new Error('Nessun modello valido disponibile dopo il caricamento.');
     }
 
+    this.applyFrontCameraPose();
+    this.updateTitleScale();
+
     return addedIds;
   }
 
@@ -1180,6 +1349,8 @@ export class PointcloudEngineAdapter {
       this.stopWindLoop();
     }
 
+    this.applyFrontCameraPose();
+    this.updateTitleScale();
   }
 
   clearModels(): void {
@@ -1189,6 +1360,8 @@ export class PointcloudEngineAdapter {
     this.modelSpawnPositions.clear();
     this.modelPointObjects.clear();
     this.stopWindLoop();
+    this.applyFrontCameraPose();
+    this.updateTitleScale();
   }
 
   frameAllModels(): void {
