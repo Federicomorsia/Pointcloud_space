@@ -1,20 +1,13 @@
+import { LOCAL_PLANT_MODELS } from './modelRegistry';
+
 /**
  * Debug Models Configuration
- * 
- * Auto-scansiona i modelli nella cartella /public/models/
- * Niente da modificare, funziona automaticamente!
+ *
+ * Usa lo stesso catalogo del caricamento realtime, evitando di ricostruire
+ * manualmente gli URL dei file con spazi o caratteri speciali.
  */
 
-// Glob automatico dei modelli disponibili
-const modelModules = import.meta.glob<string>(
-  '/public/models/*.{glb,obj,ply}',
-  { query: '?url', import: 'default', eager: true }
-);
-
-// Estrai i nomi dei file dal percorso
-export const DEBUG_MODEL_FILES = Object.keys(modelModules)
-  .map(path => path.replace('/public/models/', ''))
-  .sort();
+export const DEBUG_MODEL_FILES = LOCAL_PLANT_MODELS.map((model) => model.filename);
 
 export async function loadDebugModels(
   onAddUrl: (url: string, animationDuration?: number) => Promise<void>,
@@ -24,25 +17,21 @@ export async function loadDebugModels(
   const loaded: string[] = [];
   const failed: string[] = [];
 
-  if (!DEBUG_MODEL_FILES.length) {
+  if (!LOCAL_PLANT_MODELS.length) {
     const msg = 'Nessun modello trovato in /public/models/';
     onNotice?.(msg, 'info');
     throw new Error(msg);
   }
 
-  onNotice?.(`Caricamento ${DEBUG_MODEL_FILES.length} modelli...`, 'info');
-
-  // Costruisci URL assoluti con window.location.origin
-  const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  onNotice?.(`Caricamento ${LOCAL_PLANT_MODELS.length} modelli...`, 'info');
 
   // Stagger caricamenti per ridurre lag: 80ms tra ogni modello
-  for (let i = 0; i < DEBUG_MODEL_FILES.length; i++) {
-    const filename = DEBUG_MODEL_FILES[i];
-    const url = `${baseUrl}/models/${filename}`;
-    
+  for (let i = 0; i < LOCAL_PLANT_MODELS.length; i++) {
+    const { filename, url } = LOCAL_PLANT_MODELS[i];
+
     // Delay progressivo per distribuzione carico
     await new Promise(resolve => setTimeout(resolve, i * 80));
-    
+
     try {
       // Check if file exists with HEAD request
       const response = await fetch(url, { method: 'HEAD' });
@@ -60,7 +49,7 @@ export async function loadDebugModels(
     }
   }
 
-  const summary = `${loaded.length}/${DEBUG_MODEL_FILES.length} modelli caricati`;
+  const summary = `${loaded.length}/${LOCAL_PLANT_MODELS.length} modelli caricati`;
   onNotice?.(summary, loaded.length > 0 ? 'success' : 'error');
 
   return { loaded, failed };

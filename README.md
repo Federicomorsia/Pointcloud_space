@@ -96,9 +96,9 @@ La tabella ascoltata e `public.qr_scan_events`. Ogni insert deve avere questo fo
 
 ```json
 {
-  "qr_code": "PIANTA-001",
-  "model_key": "monstera",
-  "model_url": "/models/monstera.glb",
+  "qr_code": "PIANTA-002",
+  "model_key": "sv-002",
+  "model_url": "/models/Monstera%20Deliciosa%20sv-002.ply",
   "scanned_by": "uuid-utente-supabase",
   "source": "piantala-web-app"
 }
@@ -144,8 +144,8 @@ Per il test end-to-end:
 
 1. Avvia questo sito con `npm run dev`.
 2. Avvia l'app Piantala principale.
-3. Nell'app principale inserisci manualmente `PIANTA-001`.
-4. Questo sito deve ricevere l'evento realtime e caricare `public/models/monstera.glb`.
+3. Nell'app principale inserisci manualmente `PIANTA-002`.
+4. Questo sito deve ricevere l'evento realtime e caricare `public/models/Monstera Deliciosa sv-002.ply`.
 
 ## Controlli disponibili
 
