@@ -29,12 +29,17 @@ body {
 }
 
 .pc-layout {
+  --pc-controls-space: min(360px, 100vw);
   position: relative;
   display: block;
   min-height: 100svh;
   height: 100svh;
   width: 100%;
   overflow: hidden;
+}
+
+.pc-layout--controls-hidden {
+  --pc-controls-space: 0px;
 }
 
 .pc-controls {
@@ -306,9 +311,13 @@ input[type='color'] {
   position: relative;
   overflow: hidden;
   background: var(--bg);
-  width: 100%;
+  width: calc(100% - var(--pc-controls-space));
   height: 100svh;
   min-height: 100svh;
+  margin-left: var(--pc-controls-space);
+  transition:
+    width 180ms ease,
+    margin-left 180ms ease;
 }
 
 .pc-stage {
