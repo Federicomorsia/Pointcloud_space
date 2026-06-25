@@ -17,7 +17,7 @@ const SPAWN_COLLISION_PADDING = 1.45;
 const SPAWN_CANDIDATE_LIMIT = 5200;
 const SPAWN_DEPTH_LAYERS = [0.45, 0.2, 0, -0.2, -0.45] as const;
 const SPAWN_CAMERA_MARGIN = MODEL_SCALE * 1.45;
-const CAMERA_FIT_SAFE_VIEWPORT_FRACTION = 0.9;
+const CAMERA_FIT_SAFE_VIEWPORT_FRACTION = 0.82;
 const DEPTH_FOG_COLOR = '#000000';
 const MESH_MODEL_ROTATION = { x: -Math.PI / 2, y: -Math.PI / 6, z: 0 };
 const PLY_MODEL_ROTATION = { x: 0, y: -Math.PI / 6, z: 0 };
@@ -52,6 +52,8 @@ interface PlantBounds {
   maxX: number;
   minY: number;
   maxY: number;
+  minZ: number;
+  maxZ: number;
 }
 
 export interface ViewDebugOptions {
@@ -1073,24 +1075,26 @@ export class PointcloudEngineAdapter {
       (Math.max(Math.abs(bounds.minY - targetY), Math.abs(bounds.maxY - targetY)) +
         SPAWN_CAMERA_MARGIN) /
       CAMERA_FIT_SAFE_VIEWPORT_FRACTION;
-    const requiredDistance = Math.max(
+    const requiredDistanceAtNearestDepth = Math.max(
       requiredHalfHeight / tanHalfFov,
       requiredHalfWidth / (tanHalfFov * aspect)
     );
+    const nearestVisibleZ = Math.max(bounds.maxZ, this.viewDebug.targetZ);
+    const requiredCameraZ = nearestVisibleZ + requiredDistanceAtNearestDepth;
 
-    return Math.max(fallbackZ, requiredDistance + this.viewDebug.targetZ);
+    return Math.max(fallbackZ, requiredCameraZ);
   }
 
   private getPlantFramingBounds(): PlantBounds | null {
     let bounds: PlantBounds | null = null;
 
-    const includePoint = (x: number, y: number) => {
-      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    const includePoint = (x: number, y: number, z: number) => {
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
         return;
       }
 
       if (!bounds) {
-        bounds = { minX: x, maxX: x, minY: y, maxY: y };
+        bounds = { minX: x, maxX: x, minY: y, maxY: y, minZ: z, maxZ: z };
         return;
       }
 
@@ -1098,11 +1102,21 @@ export class PointcloudEngineAdapter {
       bounds.maxX = Math.max(bounds.maxX, x);
       bounds.minY = Math.min(bounds.minY, y);
       bounds.maxY = Math.max(bounds.maxY, y);
+      bounds.minZ = Math.min(bounds.minZ, z);
+      bounds.maxZ = Math.max(bounds.maxZ, z);
     };
 
     for (const footprint of this.modelSpawnPositions.values()) {
-      includePoint(footprint.x - footprint.radius, footprint.y - footprint.radius);
-      includePoint(footprint.x + footprint.radius, footprint.y + footprint.radius);
+      includePoint(
+        footprint.x - footprint.radius,
+        footprint.y - footprint.radius,
+        footprint.z - footprint.radius
+      );
+      includePoint(
+        footprint.x + footprint.radius,
+        footprint.y + footprint.radius,
+        footprint.z + footprint.radius
+      );
     }
 
     for (const point of this.modelPointObjects.values()) {
@@ -1112,7 +1126,39 @@ export class PointcloudEngineAdapter {
 
       point.updateMatrixWorld?.(true);
 
-      if (!point.geometry.boundingBox && typeof point.geometry.computeBoundingBox === 'function') {
+      if (!point.geometry.boundingSphere && typeof point.geometry.computeBoundingSphere === 'function') {
+        point.geometry.computeBoundingSphere();
+      }
+
+      const sphere = point.geometry.boundingSphere;
+      if (sphere?.center && Number.isFinite(sphere.radius)) {
+        const worldCenter = sphere.center.clone?.();
+        if (worldCenter?.applyMatrix4 && point.matrixWorld) {
+          worldCenter.applyMatrix4(point.matrixWorld);
+
+          const worldScale = point.scale ?? { x: 1, y: 1, z: 1 };
+          const worldRadius =
+            sphere.radius *
+            Math.max(
+              Math.abs(worldScale.x ?? 1),
+              Math.abs(worldScale.y ?? 1),
+              Math.abs(worldScale.z ?? 1)
+            );
+
+          includePoint(
+            worldCenter.x - worldRadius,
+            worldCenter.y - worldRadius,
+            worldCenter.z - worldRadius
+          );
+          includePoint(
+            worldCenter.x + worldRadius,
+            worldCenter.y + worldRadius,
+            worldCenter.z + worldRadius
+          );
+        }
+      }
+
+      if (typeof point.geometry.computeBoundingBox === 'function') {
         point.geometry.computeBoundingBox();
       }
 
@@ -1141,7 +1187,7 @@ export class PointcloudEngineAdapter {
 
       for (const [x, y, z] of corners) {
         worldPoint.set(x, y, z).applyMatrix4(point.matrixWorld);
-        includePoint(worldPoint.x, worldPoint.y);
+        includePoint(worldPoint.x, worldPoint.y, worldPoint.z);
       }
     }
 
